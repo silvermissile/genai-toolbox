@@ -1,0 +1,345 @@
+# Kyuubi 数据源和工具配置示例
+# 这是一个完整的配置文件示例，展示如何在 genai-toolbox 中使用 Kyuubi
+
+# ============================================================================
+# 数据源配置
+# ============================================================================
+sources:
+  # 开发环境 Kyuubi（无认证）
+  dev-kyuubi:
+    kind: kyuubi
+    host: localhost
+    port: 10009
+    database: default
+    authType: NONE
+    queryTimeout: 2m
+
+  # 生产环境 Kyuubi（PLAIN 认证）
+  prod-kyuubi:
+    kind: kyuubi
+    host: kyuubi.prod.example.com
+    port: 10009
+    username: ${KYUUBI_USER}          # 从环境变量读取
+    password: ${KYUUBI_PASSWORD}      # 从环境变量读取
+    database: analytics
+    authType: PLAIN
+    queryTimeout: 5m
+    sessionConf:
+      # Kyuubi 引擎配置
+      kyuubi.engine.share.level: USER
+      kyuubi.engine.type: SPARK_SQL
+      # Spark SQL 配置
+      spark.executor.memory: 2g
+      spark.executor.cores: 2
+      spark.sql.shuffle.partitions: 200
+      spark.sql.adaptive.enabled: true
+
+  # Kerberos 认证的 Kyuubi
+  secure-kyuubi:
+    kind: kyuubi
+    host: kyuubi.secure.example.com
+    port: 10009
+    database: production
+    authType: KERBEROS
+    queryTimeout: 10m
+    sessionConf:
+      kyuubi.frontend.protocols: THRIFT_BINARY
+
+# ============================================================================
+# 工具配置
+# ============================================================================
+tools:
+  # ------------------------------------------------------------------------
+  # 通用查询工具
+  # ------------------------------------------------------------------------
+  
+  # 执行任意 SQL 查询
+  execute-kyuubi-query:
+    kind: kyuubi-execute-sql
+    source: prod-kyuubi
+    description: 在 Kyuubi 中执行任意 SQL 查询语句
+
+  # ------------------------------------------------------------------------
+  # 数据探索工具
+  # ------------------------------------------------------------------------
+  
+  # 列出所有数据库
+  list-databases:
+    kind: kyuubi-sql
+    source: prod-kyuubi
+    description: 列出 Kyuubi 中的所有数据库
+    statement: SHOW DATABASES
+
+  # 列出表
+  list-tables:
+    kind: kyuubi-sql
+    source: prod-kyuubi
+    description: 列出指定数据库中的所有表
+    statement: SHOW TABLES IN {{.database}}
+    templateParameters:
+      - name: database
+        type: string
+        description: 数据库名称
+        required: true
+
+  # 查看表结构
+  describe-table:
+    kind: kyuubi-sql
+    source: prod-kyuubi
+    description: 查看表的结构信息
+    statement: DESCRIBE {{.table_name}}
+    templateParameters:
+      - name: table_name
+        type: string
+        description: 表名（可包含数据库前缀，如 db.table）
+        required: true
+
+  # 探索表数据
+  explore-table:
+    kind: kyuubi-sql
+    source: prod-kyuubi
+    description: 查看表的前 N 行数据
+    statement: |
+      SELECT * FROM {{.table_name}}
+      LIMIT {{.limit}}
+    templateParameters:
+      - name: table_name
+        type: string
+        description: 表名
+        required: true
+      - name: limit
+        type: integer
+        description: 返回记录数
+        required: true
+
+  # ------------------------------------------------------------------------
+  # 业务查询工具
+  # ------------------------------------------------------------------------
+  
+  # 销售数据统计
+  sales-by-date:
+    kind: kyuubi-sql
+    source: prod-kyuubi
+    description: 按日期统计销售数据
+    statement: |
+      SELECT 
+        DATE(order_date) as date,
+        COUNT(*) as order_count,
+        SUM(amount) as total_amount,
+        AVG(amount) as avg_amount,
+        MAX(amount) as max_amount,
+        MIN(amount) as min_amount
+      FROM orders
+      WHERE order_date BETWEEN '{{.start_date}}' AND '{{.end_date}}'
+      GROUP BY DATE(order_date)
+      ORDER BY date
+    templateParameters:
+      - name: start_date
+        type: string
+        description: 开始日期 (YYYY-MM-DD)
+        required: true
+      - name: end_date
+        type: string
+        description: 结束日期 (YYYY-MM-DD)
+        required: true
+
+  # 用户活动分析
+  user-activity-report:
+    kind: kyuubi-sql
+    source: prod-kyuubi
+    description: 生成用户活动报告
+    statement: |
+      SELECT 
+        user_id,
+        COUNT(*) as event_count,
+        COUNT(DISTINCT session_id) as session_count,
+        MIN(timestamp) as first_event,
+        MAX(timestamp) as last_event,
+        DATEDIFF(MAX(timestamp), MIN(timestamp)) as active_days
+      FROM user_events
+      WHERE user_id = {{.user_id}}
+        AND timestamp >= '{{.start_date}}'
+      GROUP BY user_id
+    templateParameters:
+      - name: user_id
+        type: integer
+        description: 用户 ID
+        required: true
+      - name: start_date
+        type: string
+        description: 开始日期 (YYYY-MM-DD)
+        required: true
+
+  # 产品销售排名
+  product-sales-ranking:
+    kind: kyuubi-sql
+    source: prod-kyuubi
+    description: 获取产品销售排名
+    statement: |
+      SELECT 
+        p.id as product_id,
+        p.name as product_name,
+        p.category,
+        SUM(o.quantity) as total_quantity,
+        SUM(o.amount) as total_revenue,
+        COUNT(DISTINCT o.user_id) as customer_count,
+        RANK() OVER (ORDER BY SUM(o.amount) DESC) as sales_rank
+      FROM orders o
+      JOIN products p ON o.product_id = p.id
+      WHERE o.order_date >= '{{.start_date}}'
+      GROUP BY p.id, p.name, p.category
+      ORDER BY sales_rank
+      LIMIT {{.top_n}}
+    templateParameters:
+      - name: start_date
+        type: string
+        description: 开始日期 (YYYY-MM-DD)
+        required: true
+      - name: top_n
+        type: integer
+        description: 返回前 N 个产品
+        required: true
+
+  # 每日指标报告
+  daily-metrics-report:
+    kind: kyuubi-sql
+    source: prod-kyuubi
+    description: 生成每日指标报告
+    statement: |
+      SELECT 
+        DATE(timestamp) as date,
+        metric_name,
+        SUM(value) as total_value,
+        AVG(value) as avg_value,
+        MAX(value) as max_value,
+        MIN(value) as min_value,
+        COUNT(*) as sample_count
+      FROM metrics
+      WHERE DATE(timestamp) = '{{.date}}'
+      GROUP BY DATE(timestamp), metric_name
+      ORDER BY metric_name
+    templateParameters:
+      - name: date
+        type: string
+        description: 日期 (YYYY-MM-DD)
+        required: true
+
+  # ------------------------------------------------------------------------
+  # 数据分析工具
+  # ------------------------------------------------------------------------
+  
+  # 按类别统计
+  sales-by-category:
+    kind: kyuubi-sql
+    source: prod-kyuubi
+    description: 按产品类别统计销售数据
+    statement: |
+      SELECT 
+        p.category,
+        COUNT(DISTINCT o.order_id) as order_count,
+        COUNT(DISTINCT o.user_id) as customer_count,
+        SUM(o.quantity) as total_quantity,
+        SUM(o.amount) as total_revenue,
+        AVG(o.amount) as avg_order_value
+      FROM orders o
+      JOIN products p ON o.product_id = p.id
+      WHERE o.order_date >= '{{.start_date}}'
+      GROUP BY p.category
+      ORDER BY total_revenue DESC
+    templateParameters:
+      - name: start_date
+        type: string
+        description: 开始日期 (YYYY-MM-DD)
+        required: true
+
+  # 用户留存分析
+  user-retention-analysis:
+    kind: kyuubi-sql
+    source: prod-kyuubi
+    description: 分析用户留存情况
+    statement: |
+      WITH user_cohorts AS (
+        SELECT 
+          user_id,
+          DATE_TRUNC('month', MIN(order_date)) as cohort_month
+        FROM orders
+        GROUP BY user_id
+      ),
+      monthly_activity AS (
+        SELECT 
+          uc.user_id,
+          uc.cohort_month,
+          DATE_TRUNC('month', o.order_date) as activity_month,
+          MONTHS_BETWEEN(o.order_date, uc.cohort_month) as month_number
+        FROM user_cohorts uc
+        JOIN orders o ON uc.user_id = o.user_id
+      )
+      SELECT 
+        cohort_month,
+        month_number,
+        COUNT(DISTINCT user_id) as active_users
+      FROM monthly_activity
+      WHERE cohort_month = '{{.cohort_month}}'
+      GROUP BY cohort_month, month_number
+      ORDER BY month_number
+    templateParameters:
+      - name: cohort_month
+        type: string
+        description: 队列月份 (YYYY-MM-01)
+        required: true
+
+  # ------------------------------------------------------------------------
+  # 数据质量检查
+  # ------------------------------------------------------------------------
+  
+  # 检查空值
+  check-null-values:
+    kind: kyuubi-sql
+    source: prod-kyuubi
+    description: 检查表中的空值情况
+    statement: |
+      SELECT 
+        '{{.table_name}}' as table_name,
+        '{{.column_name}}' as column_name,
+        COUNT(*) as total_rows,
+        SUM(CASE WHEN {{.column_name}} IS NULL THEN 1 ELSE 0 END) as null_count,
+        ROUND(SUM(CASE WHEN {{.column_name}} IS NULL THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as null_percentage
+      FROM {{.table_name}}
+    templateParameters:
+      - name: table_name
+        type: string
+        description: 表名
+        required: true
+      - name: column_name
+        type: string
+        description: 列名
+        required: true
+
+  # 数据分布统计
+  column-distribution:
+    kind: kyuubi-sql
+    source: prod-kyuubi
+    description: 查看列值的分布情况
+    statement: |
+      SELECT 
+        {{.column_name}} as value,
+        COUNT(*) as count,
+        ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) as percentage
+      FROM {{.table_name}}
+      GROUP BY {{.column_name}}
+      ORDER BY count DESC
+      LIMIT {{.limit}}
+    templateParameters:
+      - name: table_name
+        type: string
+        description: 表名
+        required: true
+      - name: column_name
+        type: string
+        description: 列名
+        required: true
+      - name: limit
+        type: integer
+        description: 返回前 N 个值
+        required: true
+

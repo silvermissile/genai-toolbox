@@ -136,6 +136,47 @@ su - developer
 
 ---
 
+## 🗄️ 数据源集成文档
+
+### Apache Kyuubi 数据源
+
+完整的 Kyuubi/Spark SQL 数据源集成，支持大数据查询场景。
+
+- [⚡ Kyuubi 快速开始](./KYUUBI_QUICKSTART.md) - **5 分钟快速上手**
+- [📖 Kyuubi 集成指南](./KYUUBI_README.md) - 快速开始、配置详解、故障排查
+- [💡 Kyuubi 使用示例](./KYUUBI_EXAMPLES.md) - 20+ 实际业务场景示例
+- [🔧 Kyuubi 配置示例](./kyuubi-example-tools.yaml) - 完整的 YAML 配置文件
+- [📋 Kyuubi 实现总结](./KYUUBI_IMPLEMENTATION_SUMMARY.md) - 实现细节和文件清单
+- [🎯 database/sql 在大数据中的必要性](./DATABASE_SQL_FOR_BIG_DATA.md) - **技术选型深度解析**
+- [🏗️ Kyuubi Go 客户端技术方案](./kyuubi_go_client_design.md) - 详细的技术设计文档
+
+**快速开始**:
+
+```yaml
+# tools.yaml
+sources:
+  my-kyuubi:
+    kind: kyuubi
+    host: kyuubi-server.example.com
+    port: 10009
+    username: ${KYUUBI_USER}
+    password: ${KYUUBI_PASSWORD}
+    authType: PLAIN
+
+tools:
+  query-data:
+    kind: kyuubi-sql
+    source: my-kyuubi
+    description: 查询数据
+    statement: SELECT * FROM table LIMIT {{.limit}}
+    templateParameters:
+      - name: limit
+        type: integer
+        required: true
+```
+
+---
+
 ## 📖 相关文档
 
 - [项目主 README](../../README.md) - 项目整体介绍
