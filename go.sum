@@ -748,10 +748,6 @@ github.com/aws/aws-sdk-go-v2/service/sts v1.38.4 h1:PR00NXRYgY4FWHqOGx3fC3lhVKjs
 github.com/aws/aws-sdk-go-v2/service/sts v1.38.4/go.mod h1:Z+Gd23v97pX9zK97+tX4ppAgqCt3Z2dIXB02CtBncK8=
 github.com/aws/smithy-go v1.23.0 h1:8n6I3gXzWJB2DxBDnfxgBaSX6oe0d/t10qGz7OKqMCE=
 github.com/aws/smithy-go v1.23.0/go.mod h1:t1ufH5HMublsJYulve2RKmHDC15xu1f26kHCp/HgceI=
-github.com/beltran/gohive v1.8.1 h1:qlygmroy3mKtKIQSpV/FqXJHty1LsPxF+JTQA5mbjwU=
-github.com/beltran/gohive v1.8.1/go.mod h1:BCgNAhr/wnbyXfp2yN9ZY4pVrGrtVqG4hhNDDXIal1U=
-github.com/beltran/gohive/v2 v2.0.0-rc2 h1:SdQ/9NCk3/ygxk9NhEbxEfWm9yflkoh2lmiGlcIqlB0=
-github.com/beltran/gohive/v2 v2.0.0-rc2/go.mod h1:MrxyI0sdriG52I+Bo2lJpGR75bxjcI/Hx3+MBnYqR10=
 github.com/beltran/gosasl v1.0.0 h1:iiRtLxkvKhrNv3Ohh/n2NiyyfwIo/UbMzy/dZWiUHXE=
 github.com/beltran/gosasl v1.0.0/go.mod h1:Qx8cW6jkI8riyzmklj80kAIkv+iezFUTBiGU0qHhHes=
 github.com/beltran/gssapi v0.0.0-20200324152954-d86554db4bab h1:ayfcn60tXOSYy5zUN1AMSTQo4nJCf7hrdzAVchpPst4=
@@ -920,8 +916,6 @@ github.com/go-sql-driver/mysql v1.9.3/go.mod h1:qn46aNg1333BRMNU69Lq93t8du/dwxI6
 github.com/go-stack/stack v1.8.0/go.mod h1:v0f6uXyyMGvRgIKkXu+yp6POWl0qKG85gN/melR3HDY=
 github.com/go-viper/mapstructure/v2 v2.4.0 h1:EBsztssimR/CONLSZZ04E8qAkxNYq4Qp9LvH92wZUgs=
 github.com/go-viper/mapstructure/v2 v2.4.0/go.mod h1:oJDH3BJKyqBA2TXFhDsKDGDTlndYOZ6rGS0BRZIxGhM=
-github.com/go-zookeeper/zk v1.0.4 h1:DPzxraQx7OrPyXq2phlGlNSIyWEsAox0RJmjTseMV6I=
-github.com/go-zookeeper/zk v1.0.4/go.mod h1:nOB03cncLtlp4t+UAkGSV+9beXP/akpekBwL+UX1Qcw=
 github.com/goccy/go-json v0.9.11/go.mod h1:6MelG93GURQebXPDq3khkgXZkazVtN9CRI+MGFi0w8I=
 github.com/goccy/go-json v0.10.5 h1:Fq85nIqj+gXn/S5ahsiTlK3TmC85qgirsdTP/+DeaC4=
 github.com/goccy/go-json v0.10.5/go.mod h1:oq7eo15ShAhp70Anwd5lgX2pLfOS3QCiwU/PULtXL6M=
@@ -1256,6 +1250,8 @@ github.com/shopspring/decimal v1.4.0 h1:bxl37RwXBklmTi0C79JfXCEBD1cqqHt0bbgBAGFp
 github.com/shopspring/decimal v1.4.0/go.mod h1:gawqmDU56v4yIKSwfBSFip1HdCCXN8/+DMd9qYNcwME=
 github.com/sijms/go-ora/v2 v2.9.0 h1:+iQbUeTeCOFMb5BsOMgUhV8KWyrv9yjKpcK4x7+MFrg=
 github.com/sijms/go-ora/v2 v2.9.0/go.mod h1:QgFInVi3ZWyqAiJwzBQA+nbKYKH77tdp1PYoCqhR2dU=
+github.com/silvermissile/gohive/v2 v2.0.0-20251226093343-357f1af3885e h1:Dml41uwHgu15KZzFkYduY58l+387yiwGjs+xejEbf0w=
+github.com/silvermissile/gohive/v2 v2.0.0-20251226093343-357f1af3885e/go.mod h1:MrxyI0sdriG52I+Bo2lJpGR75bxjcI/Hx3+MBnYqR10=
 github.com/sirupsen/logrus v1.4.2/go.mod h1:tLMulIdttU9McNUspp0xgXVQah82FyeX6MwdIuYE2rE=
 github.com/sirupsen/logrus v1.9.3 h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ=
 github.com/sirupsen/logrus v1.9.3/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVsIT4qYEQ=

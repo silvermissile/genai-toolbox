@@ -17,13 +17,12 @@ package kyuubi
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	"fmt"
-	"reflect"
 	"time"
-	"unsafe"
 
-	gohive "github.com/beltran/gohive/v2"
+	// 导入 gohive v2 驱动（使用修复后的 fork）
+	// See: https://github.com/beltran/gohive/pull/259
+	_ "github.com/beltran/gohive/v2"
 	"github.com/goccy/go-yaml"
 	"github.com/googleapis/genai-toolbox/internal/sources"
 	"github.com/googleapis/genai-toolbox/internal/util"
@@ -109,74 +108,6 @@ func (s *Source) KyuubiPool() *sql.DB {
 	return s.Pool
 }
 
-// kyuubiConnector 是一个修复了 gohive v2 bug 的 connector 包装器
-// gohive v2 的 OpenConnector 函数没有将 HiveConfiguration 传递给连接配置
-// 这个包装器使用反射来修复这个问题
-type kyuubiConnector struct {
-	inner             driver.Connector
-	hiveConfiguration map[string]string
-}
-
-// Connect 实现 driver.Connector 接口
-// 它会在连接前使用反射设置 HiveConfiguration
-func (c *kyuubiConnector) Connect(ctx context.Context) (driver.Conn, error) {
-	// 使用反射修复 gohive v2 的 bug
-	// 设置 connector.config.HiveConfiguration
-	if len(c.hiveConfiguration) > 0 {
-		if err := setHiveConfiguration(c.inner, c.hiveConfiguration); err != nil {
-			// 如果反射失败，记录警告但继续连接（配置可能不生效）
-			// 这样至少不会阻止连接
-		}
-	}
-	return c.inner.Connect(ctx)
-}
-
-// Driver 实现 driver.Connector 接口
-func (c *kyuubiConnector) Driver() driver.Driver {
-	return c.inner.Driver()
-}
-
-// setHiveConfiguration 使用反射设置 gohive connector 的 HiveConfiguration
-// gohive v2 的 connector 结构：
-//
-//	type connector struct {
-//	    config *connectConfiguration
-//	}
-//	type connectConfiguration struct {
-//	    HiveConfiguration map[string]string
-//	}
-func setHiveConfiguration(connector driver.Connector, hiveConfig map[string]string) error {
-	// 获取 connector 的反射值
-	connVal := reflect.ValueOf(connector)
-	if connVal.Kind() == reflect.Ptr {
-		connVal = connVal.Elem()
-	}
-
-	// 查找 config 字段
-	configField := connVal.FieldByName("config")
-	if !configField.IsValid() {
-		return fmt.Errorf("config field not found in connector")
-	}
-
-	// config 是一个指针，获取它指向的值
-	if configField.Kind() == reflect.Ptr {
-		configField = configField.Elem()
-	}
-
-	// 查找 HiveConfiguration 字段
-	hiveConfigField := configField.FieldByName("HiveConfiguration")
-	if !hiveConfigField.IsValid() {
-		return fmt.Errorf("HiveConfiguration field not found in config")
-	}
-
-	// 使用 unsafe 设置私有字段
-	// 这是因为 gohive 的 connectConfiguration 是私有类型
-	hiveConfigPtr := unsafe.Pointer(hiveConfigField.UnsafeAddr())
-	*(*map[string]string)(hiveConfigPtr) = hiveConfig
-
-	return nil
-}
-
 // initKyuubiConnectionPool 初始化 Kyuubi 连接池
 func initKyuubiConnectionPool(ctx context.Context, tracer trace.Tracer, config Config) (*sql.DB, error) {
 	//nolint:all // Reassigned ctx
@@ -198,24 +129,16 @@ func initKyuubiConnectionPool(ctx context.Context, tracer trace.Tracer, config C
 	}
 
 	// 构建 DSN (Data Source Name)
+	// 会话配置通过 DSN 传递给 gohive，gohive 会在打开会话时将其发送给 Kyuubi
 	dsn := buildKyuubiDSN(config)
 
-	// 使用 gohive 的 Driver 创建 connector
-	gohiveDriver := &gohive.Driver{}
-	innerConnector, err := gohiveDriver.OpenConnector(dsn)
+	// 使用 gohive v2 驱动打开连接
+	// 注意: 使用修复后的 fork (silvermissile/gohive)，已修复 HiveConfiguration 传递问题
+	// See: https://github.com/beltran/gohive/pull/259
+	db, err := sql.Open("hive", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("gohive.OpenConnector: %w", err)
+		return nil, fmt.Errorf("sql.Open: %w", err)
 	}
-
-	// 创建修复后的 connector，它会正确传递 HiveConfiguration
-	// 这是为了修复 gohive v2 的 bug：OpenConnector 没有设置 config.HiveConfiguration
-	fixedConnector := &kyuubiConnector{
-		inner:             innerConnector,
-		hiveConfiguration: config.SessionConf,
-	}
-
-	// 使用 sql.OpenDB 创建数据库连接
-	db := sql.OpenDB(fixedConnector)
 
 	// 配置连接池
 	// Kyuubi 连接启动慢，成本高，所以连接数不要太多
@@ -241,9 +164,8 @@ func initKyuubiConnectionPool(ctx context.Context, tracer trace.Tracer, config C
 }
 
 // buildKyuubiDSN 构建 Kyuubi DSN 字符串
-// 注意: gohive v2 的 database/sql 驱动存在 bug，不会将 DSN 中的 HiveConfiguration 传递给连接
-// 但我们仍然在 DSN 中包含这些配置，以备将来 gohive 修复此问题
-// 对于静态 Spark 配置（如 spark.executor.memory），这些配置必须在连接时传递
+// DSN 格式: hive://username:password@host:port/database?auth=AUTHTYPE&transport=MODE&key1=value1&key2=value2
+// 会话配置（如 spark.executor.memory）通过 DSN 参数传递给 Kyuubi
 // 参考: https://kyuubi.readthedocs.io/en/master/configuration/settings.html
 func buildKyuubiDSN(config Config) string {
 	// 基本格式: hive://username:password@host:port/database

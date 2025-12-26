@@ -19,7 +19,7 @@ require (
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.53.0
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace v1.30.0
 	github.com/apache/cassandra-gocql-driver/v2 v2.0.0
-	github.com/beltran/gohive v1.8.1
+	github.com/beltran/gohive/v2 v2.0.0-rc2
 	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/couchbase/gocb/v2 v2.11.1
 	github.com/couchbase/tools-common/http v1.0.9
@@ -97,7 +97,6 @@ require (
 	github.com/ajg/form v1.5.1 // indirect
 	github.com/apache/arrow/go/v15 v15.0.2 // indirect
 	github.com/apache/thrift v0.22.0 // indirect
-	github.com/beltran/gohive/v2 v2.0.0-rc2 // indirect
 	github.com/beltran/gosasl v1.0.0 // indirect
 	github.com/beltran/gssapi v0.0.0-20200324152954-d86554db4bab // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -119,7 +118,6 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
-	github.com/go-zookeeper/zk v1.0.4 // indirect
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/godror/knownpb v0.3.0 // indirect
 	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
@@ -201,3 +199,8 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+// Use forked gohive with HiveConfiguration fix (one line fix in v2/driver.go)
+// See: https://github.com/beltran/gohive/pull/259
+// Remove this replace directive once the fix is merged upstream
+replace github.com/beltran/gohive/v2 => github.com/silvermissile/gohive/v2 v2.0.0-20251226093343-357f1af3885e
