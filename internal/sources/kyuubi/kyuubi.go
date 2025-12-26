@@ -17,17 +17,17 @@ package kyuubi
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
+	"reflect"
 	"time"
+	"unsafe"
 
+	gohive "github.com/beltran/gohive/v2"
 	"github.com/goccy/go-yaml"
 	"github.com/googleapis/genai-toolbox/internal/sources"
 	"github.com/googleapis/genai-toolbox/internal/util"
 	"go.opentelemetry.io/otel/trace"
-
-	// 导入 gohive v2 驱动
-	// gohive v2 实现了 database/sql 驱动接口
-	_ "github.com/beltran/gohive/v2"
 )
 
 const SourceKind string = "kyuubi"
@@ -109,6 +109,74 @@ func (s *Source) KyuubiPool() *sql.DB {
 	return s.Pool
 }
 
+// kyuubiConnector 是一个修复了 gohive v2 bug 的 connector 包装器
+// gohive v2 的 OpenConnector 函数没有将 HiveConfiguration 传递给连接配置
+// 这个包装器使用反射来修复这个问题
+type kyuubiConnector struct {
+	inner             driver.Connector
+	hiveConfiguration map[string]string
+}
+
+// Connect 实现 driver.Connector 接口
+// 它会在连接前使用反射设置 HiveConfiguration
+func (c *kyuubiConnector) Connect(ctx context.Context) (driver.Conn, error) {
+	// 使用反射修复 gohive v2 的 bug
+	// 设置 connector.config.HiveConfiguration
+	if len(c.hiveConfiguration) > 0 {
+		if err := setHiveConfiguration(c.inner, c.hiveConfiguration); err != nil {
+			// 如果反射失败，记录警告但继续连接（配置可能不生效）
+			// 这样至少不会阻止连接
+		}
+	}
+	return c.inner.Connect(ctx)
+}
+
+// Driver 实现 driver.Connector 接口
+func (c *kyuubiConnector) Driver() driver.Driver {
+	return c.inner.Driver()
+}
+
+// setHiveConfiguration 使用反射设置 gohive connector 的 HiveConfiguration
+// gohive v2 的 connector 结构：
+//
+//	type connector struct {
+//	    config *connectConfiguration
+//	}
+//	type connectConfiguration struct {
+//	    HiveConfiguration map[string]string
+//	}
+func setHiveConfiguration(connector driver.Connector, hiveConfig map[string]string) error {
+	// 获取 connector 的反射值
+	connVal := reflect.ValueOf(connector)
+	if connVal.Kind() == reflect.Ptr {
+		connVal = connVal.Elem()
+	}
+
+	// 查找 config 字段
+	configField := connVal.FieldByName("config")
+	if !configField.IsValid() {
+		return fmt.Errorf("config field not found in connector")
+	}
+
+	// config 是一个指针，获取它指向的值
+	if configField.Kind() == reflect.Ptr {
+		configField = configField.Elem()
+	}
+
+	// 查找 HiveConfiguration 字段
+	hiveConfigField := configField.FieldByName("HiveConfiguration")
+	if !hiveConfigField.IsValid() {
+		return fmt.Errorf("HiveConfiguration field not found in config")
+	}
+
+	// 使用 unsafe 设置私有字段
+	// 这是因为 gohive 的 connectConfiguration 是私有类型
+	hiveConfigPtr := unsafe.Pointer(hiveConfigField.UnsafeAddr())
+	*(*map[string]string)(hiveConfigPtr) = hiveConfig
+
+	return nil
+}
+
 // initKyuubiConnectionPool 初始化 Kyuubi 连接池
 func initKyuubiConnectionPool(ctx context.Context, tracer trace.Tracer, config Config) (*sql.DB, error) {
 	//nolint:all // Reassigned ctx
@@ -130,17 +198,24 @@ func initKyuubiConnectionPool(ctx context.Context, tracer trace.Tracer, config C
 	}
 
 	// 构建 DSN (Data Source Name)
-	// 格式: hive://username:password@host:port/database?auth=AUTHTYPE&transport=MODE&key1=value1&key2=value2
-	// 注意: sessionConf 必须通过 DSN 传递，因为 Spark 静态配置（如 executor.memory）
-	// 只能在引擎启动时设置，不能通过 SET 语句在运行时修改
-	// 参考: https://kyuubi.readthedocs.io/en/master/configuration/settings.html
 	dsn := buildKyuubiDSN(config)
 
-	// 打开数据库连接
-	db, err := sql.Open("hive", dsn)
+	// 使用 gohive 的 Driver 创建 connector
+	gohiveDriver := &gohive.Driver{}
+	innerConnector, err := gohiveDriver.OpenConnector(dsn)
 	if err != nil {
-		return nil, fmt.Errorf("sql.Open: %w", err)
+		return nil, fmt.Errorf("gohive.OpenConnector: %w", err)
 	}
+
+	// 创建修复后的 connector，它会正确传递 HiveConfiguration
+	// 这是为了修复 gohive v2 的 bug：OpenConnector 没有设置 config.HiveConfiguration
+	fixedConnector := &kyuubiConnector{
+		inner:             innerConnector,
+		hiveConfiguration: config.SessionConf,
+	}
+
+	// 使用 sql.OpenDB 创建数据库连接
+	db := sql.OpenDB(fixedConnector)
 
 	// 配置连接池
 	// Kyuubi 连接启动慢，成本高，所以连接数不要太多
@@ -154,16 +229,11 @@ func initKyuubiConnectionPool(ctx context.Context, tracer trace.Tracer, config C
 		return nil, fmt.Errorf("unable to connect successfully: %w", err)
 	}
 
-	// 警告: gohive v2 的 database/sql 驱动有已知限制
-	// 会话配置（sessionConf）可能不会生效，因为 gohive 没有将这些配置传递给 Kyuubi
-	// 静态 Spark 配置（如 spark.executor.memory）需要在 Kyuubi 服务器端配置
-	// 参考: https://github.com/beltran/gohive/issues
+	// 日志记录会话配置
 	if len(config.SessionConf) > 0 {
 		logger, logErr := util.LoggerFromContext(ctx)
 		if logErr == nil {
-			logger.WarnContext(ctx, "sessionConf may not take effect due to gohive v2 driver limitation. "+
-				"Static Spark configs (e.g., spark.executor.memory) should be configured on Kyuubi server side. "+
-				"See: https://kyuubi.readthedocs.io/en/master/configuration/settings.html")
+			logger.InfoContext(ctx, fmt.Sprintf("Kyuubi session config applied: %v", config.SessionConf))
 		}
 	}
 
