@@ -129,15 +129,12 @@ func initKyuubiConnectionPool(ctx context.Context, tracer trace.Tracer, config C
 		config.TransportMode = "binary"
 	}
 
-	// 获取用户代理信息
-	userAgent, err := util.UserAgentFromContext(ctx)
-	if err != nil {
-		userAgent = "genai-toolbox"
-	}
-
 	// 构建 DSN (Data Source Name)
-	// 格式: hive://username:password@host:port/database?auth=AUTHTYPE&transportMode=MODE
-	dsn := buildKyuubiDSN(config, userAgent)
+	// 格式: hive://username:password@host:port/database?auth=AUTHTYPE&transport=MODE&key1=value1&key2=value2
+	// 注意: sessionConf 必须通过 DSN 传递，因为 Spark 静态配置（如 executor.memory）
+	// 只能在引擎启动时设置，不能通过 SET 语句在运行时修改
+	// 参考: https://kyuubi.readthedocs.io/en/master/configuration/settings.html
+	dsn := buildKyuubiDSN(config)
 
 	// 打开数据库连接
 	db, err := sql.Open("hive", dsn)
@@ -151,11 +148,34 @@ func initKyuubiConnectionPool(ctx context.Context, tracer trace.Tracer, config C
 	db.SetMaxIdleConns(2)                   // 最大空闲连接数
 	db.SetConnMaxLifetime(30 * time.Minute) // 连接最大生命周期
 
+	// 验证连接
+	if err := db.PingContext(ctx); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("unable to connect successfully: %w", err)
+	}
+
+	// 警告: gohive v2 的 database/sql 驱动有已知限制
+	// 会话配置（sessionConf）可能不会生效，因为 gohive 没有将这些配置传递给 Kyuubi
+	// 静态 Spark 配置（如 spark.executor.memory）需要在 Kyuubi 服务器端配置
+	// 参考: https://github.com/beltran/gohive/issues
+	if len(config.SessionConf) > 0 {
+		logger, logErr := util.LoggerFromContext(ctx)
+		if logErr == nil {
+			logger.WarnContext(ctx, "sessionConf may not take effect due to gohive v2 driver limitation. "+
+				"Static Spark configs (e.g., spark.executor.memory) should be configured on Kyuubi server side. "+
+				"See: https://kyuubi.readthedocs.io/en/master/configuration/settings.html")
+		}
+	}
+
 	return db, nil
 }
 
 // buildKyuubiDSN 构建 Kyuubi DSN 字符串
-func buildKyuubiDSN(config Config, userAgent string) string {
+// 注意: gohive v2 的 database/sql 驱动存在 bug，不会将 DSN 中的 HiveConfiguration 传递给连接
+// 但我们仍然在 DSN 中包含这些配置，以备将来 gohive 修复此问题
+// 对于静态 Spark 配置（如 spark.executor.memory），这些配置必须在连接时传递
+// 参考: https://kyuubi.readthedocs.io/en/master/configuration/settings.html
+func buildKyuubiDSN(config Config) string {
 	// 基本格式: hive://username:password@host:port/database
 	dsn := fmt.Sprintf("hive://%s:%s@%s:%d/%s",
 		config.Username,
@@ -173,15 +193,13 @@ func buildKyuubiDSN(config Config, userAgent string) string {
 		params = append(params, fmt.Sprintf("auth=%s", config.AuthType))
 	}
 
-	// 传输模式
+	// 传输模式 (gohive v2 使用 "transport" 参数名)
 	if config.TransportMode != "" {
-		params = append(params, fmt.Sprintf("transportMode=%s", config.TransportMode))
+		params = append(params, fmt.Sprintf("transport=%s", config.TransportMode))
 	}
 
-	// 用户代理
-	params = append(params, fmt.Sprintf("user_agent=%s", userAgent))
-
-	// 会话配置
+	// 会话配置 - 包含 Kyuubi/Spark 配置参数
+	// 这些配置会被 Kyuubi 用于启动 Spark 引擎
 	for key, value := range config.SessionConf {
 		params = append(params, fmt.Sprintf("%s=%s", key, value))
 	}
