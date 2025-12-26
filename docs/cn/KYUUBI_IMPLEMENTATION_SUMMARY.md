@@ -269,7 +269,7 @@ db.SetConnMaxLifetime(30*time.Minute)  // 定期回收连接
 authType: NONE
 
 # PLAIN（用户名/密码）
-authType: PLAIN
+authType: NONE    # 支持: NOSASL, NONE, LDAP, KERBEROS
 username: ${KYUUBI_USER}
 password: ${KYUUBI_PASSWORD}
 
@@ -315,7 +315,7 @@ sources:
     username: ${KYUUBI_USER}
     password: ${KYUUBI_PASSWORD}
     database: default
-    authType: PLAIN
+    authType: NONE    # 支持: NOSASL, NONE, LDAP, KERBEROS
     queryTimeout: 5m
 ```
 

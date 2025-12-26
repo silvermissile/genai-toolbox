@@ -411,7 +411,7 @@ sources:
     username: ${KYUUBI_USER}
     password: ${KYUUBI_PASSWORD}
     database: analytics
-    authType: PLAIN
+    authType: NONE    # 支持: NOSASL, NONE, LDAP, KERBEROS
     queryTimeout: 5m
     sessionConf:
       kyuubi.engine.share.level: USER

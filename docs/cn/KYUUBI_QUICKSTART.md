@@ -119,7 +119,7 @@ sources:
     username: ${KYUUBI_USER}      # ✅ 从环境变量读取
     password: ${KYUUBI_PASSWORD}  # ✅ 不要硬编码密码
     database: production
-    authType: PLAIN               # 使用用户名/密码认证
+    authType: NONE                # 使用用户名/密码认证 (或 LDAP)
     queryTimeout: 5m              # 设置查询超时
 ```
 
@@ -133,7 +133,7 @@ sources:
     port: 10009
     username: ${KYUUBI_USER}
     password: ${KYUUBI_PASSWORD}
-    authType: PLAIN
+    authType: NONE    # 支持: NOSASL, NONE, LDAP, KERBEROS
     queryTimeout: 5m
     sessionConf:
       # Kyuubi 引擎配置
@@ -176,7 +176,7 @@ sources:
 # 检查认证配置
 sources:
   my-kyuubi:
-    authType: PLAIN           # 确保类型正确
+    authType: NONE    # 支持: NOSASL, NONE, LDAP, KERBEROS           # 确保类型正确
     username: correct-user    # 检查用户名
     password: correct-pass    # 检查密码
 ```

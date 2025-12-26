@@ -123,7 +123,7 @@ func initKyuubiConnectionPool(ctx context.Context, tracer trace.Tracer, config C
 		config.Database = "default"
 	}
 	if config.AuthType == "" {
-		config.AuthType = "NONE"
+		config.AuthType = "NONE" // 支持: NOSASL, NONE, LDAP, CUSTOM, KERBEROS, DIGEST-MD5
 	}
 	if config.TransportMode == "" {
 		config.TransportMode = "binary"

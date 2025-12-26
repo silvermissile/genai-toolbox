@@ -29,7 +29,7 @@ sources:
     username: ${KYUUBI_USER}       # 从环境变量读取
     password: ${KYUUBI_PASSWORD}
     database: default              # 默认数据库
-    authType: PLAIN                # 认证类型
+    authType: NONE                 # 认证类型 (NOSASL/NONE/LDAP/CUSTOM/KERBEROS)
     queryTimeout: 5m               # 查询超时时间
     sessionConf:                   # Kyuubi/Spark 会话配置
       kyuubi.engine.share.level: USER
@@ -158,7 +158,7 @@ sources:
     port: 10009
     username: ${KYUUBI_USER}
     password: ${KYUUBI_PASSWORD}
-    authType: PLAIN
+    authType: NONE    # 支持: NOSASL, NONE, LDAP, KERBEROS
 ```
 
 #### KERBEROS
@@ -349,7 +349,7 @@ sources:
 authType: NONE
 
 # 生产环境
-authType: PLAIN  # 或 KERBEROS, LDAP
+authType: NONE    # 支持: NOSASL, NONE, LDAP, KERBEROS  # 或 KERBEROS, LDAP
 ```
 
 ## 🐛 故障排查

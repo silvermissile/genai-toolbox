@@ -22,7 +22,7 @@ sources:
     username: ${KYUUBI_USER}          # 从环境变量读取
     password: ${KYUUBI_PASSWORD}      # 从环境变量读取
     database: analytics
-    authType: PLAIN
+    authType: NONE    # 支持: NOSASL, NONE, LDAP, CUSTOM, KERBEROS, DIGEST-MD5
     queryTimeout: 5m
     sessionConf:
       # Kyuubi 引擎配置

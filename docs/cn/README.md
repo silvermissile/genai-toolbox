@@ -161,7 +161,7 @@ sources:
     port: 10009
     username: ${KYUUBI_USER}
     password: ${KYUUBI_PASSWORD}
-    authType: PLAIN
+    authType: NONE    # 支持: NOSASL, NONE, LDAP, KERBEROS
 
 tools:
   query-data:
