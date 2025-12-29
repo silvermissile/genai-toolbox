@@ -514,9 +514,9 @@ genai-toolbox server --config tools.yaml
 ```json
 {
   "mcpServers": {
-    "genai-toolbox": {
-      "command": "genai-toolbox",
-      "args": ["server", "--config", "tools.yaml"]
+    "gai_toolbox": {
+      "type": "http",
+      "url": "http://localhost:5001/mcp"
     }
   }
 }
