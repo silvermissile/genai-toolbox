@@ -130,6 +130,10 @@ AI Agent 调用:
 | `queryTimeout` | string | ❌ | - | 查询超时（如 `5m`, `30s`） |
 | `sessionConf` | map | ❌ | - | Kyuubi/Spark 会话配置 |
 | `transportMode` | string | ❌ | binary | 传输模式（`binary` 或 `http`） |
+| `maxOpenConns` | int | ❌ | 5 | 最大打开连接数 |
+| `maxIdleConns` | int | ❌ | 0 | 最大空闲连接数（0=不保持空闲连接） |
+| `connMaxLifetime` | string | ❌ | 30m | 连接最大生命周期 |
+| `connMaxIdleTime` | string | ❌ | 5m | 连接最大空闲时间 |
 
 ### 认证类型
 
@@ -286,16 +290,73 @@ Kyuubi/Spark SQL 支持的数据类型会自动映射到 Go 类型：
 
 ## ⚙️ 连接池配置
 
-Kyuubi 数据源使用连接池来管理数据库连接：
+Kyuubi 数据源使用连接池来管理数据库连接。**默认配置已针对 Spark on K8s 弹性资源优化**。
 
-```go
-// 默认连接池配置
-MaxOpenConns: 5              // 最大打开连接数（Kyuubi 连接成本高）
-MaxIdleConns: 2              // 最大空闲连接数
-ConnMaxLifetime: 30分钟      // 连接最大生命周期
+### 配置选项
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `maxOpenConns` | int | 5 | 最大打开连接数 |
+| `maxIdleConns` | int | **0** | 最大空闲连接数（默认不保持空闲连接） |
+| `connMaxLifetime` | string | 30m | 连接最大生命周期 |
+| `connMaxIdleTime` | string | 5m | 连接最大空闲时间 |
+
+### 默认配置（针对 K8s 弹性资源优化）
+
+```yaml
+sources:
+  my-kyuubi:
+    kind: kyuubi
+    # ... 其他配置 ...
+    
+    # 连接池配置（以下为默认值，无需显式配置）
+    maxOpenConns: 5        # 最大打开连接数
+    maxIdleConns: 0        # 不保持空闲连接，查询完成后关闭
+    connMaxLifetime: 30m   # 连接最多存活 30 分钟
+    connMaxIdleTime: 5m    # 空闲超过 5 分钟的连接会被关闭
 ```
 
-**为什么连接数较少？**
+### 为什么默认不保持空闲连接？
+
+对于 **Spark on K8s** 环境：
+- Kyuubi 连接绑定一个 Spark 应用（包含 Driver 和 Executor Pods）
+- 保持空闲连接 = Spark Executor 无法释放 = **浪费 K8s 弹性资源**
+- 默认 `maxIdleConns: 0` 确保查询完成后 Spark 资源可以释放
+
+### 场景配置建议
+
+#### 场景 1：Spark on K8s 弹性资源（默认，推荐）
+
+```yaml
+# 使用默认配置即可，无需额外设置
+# 查询完成后连接关闭，Spark executor 可以释放
+```
+
+#### 场景 2：固定资源池，追求快速响应
+
+如果你有固定的 Spark 资源池，希望减少连接启动时间：
+
+```yaml
+sources:
+  my-kyuubi:
+    kind: kyuubi
+    # ... 其他配置 ...
+    maxIdleConns: 2        # 保持 2 个空闲连接
+    connMaxIdleTime: 30m   # 空闲连接保持更长时间
+```
+
+#### 场景 3：高并发查询
+
+```yaml
+sources:
+  my-kyuubi:
+    kind: kyuubi
+    # ... 其他配置 ...
+    maxOpenConns: 10       # 允许更多并发连接
+    maxIdleConns: 3        # 保持一些空闲连接
+```
+
+### 为什么连接数不宜过多？
 
 - Kyuubi 连接启动慢（需要启动 Spark 引擎，10-30 秒）
 - 每个连接消耗大量资源（关联一个 Spark 应用）
@@ -435,12 +496,14 @@ sessionConf:
 - ✅ 复用连接，避免频繁创建/销毁
 - ✅ 控制并发连接数，防止资源耗尽
 - ✅ 在 AI Agent 场景下显著提升性能
+- ✅ **针对 K8s 弹性资源优化**（默认不保持空闲连接）
 
 ```go
-// 自动连接池配置
-db.SetMaxOpenConns(5)              // 最多 5 个连接
-db.SetMaxIdleConns(2)              // 保持 2 个空闲连接
+// 默认连接池配置（针对 Spark on K8s 优化）
+db.SetMaxOpenConns(5)                  // 最多 5 个连接
+db.SetMaxIdleConns(0)                  // 不保持空闲连接，释放 K8s 资源
 db.SetConnMaxLifetime(30*time.Minute)  // 30 分钟后回收
+db.SetConnMaxIdleTime(5*time.Minute)   // 空闲 5 分钟后关闭
 ```
 
 #### 2. 超时控制
