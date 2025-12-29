@@ -61,6 +61,13 @@ type Config struct {
 	QueryTimeout  string            `yaml:"queryTimeout"`             // 查询超时时间
 	SessionConf   map[string]string `yaml:"sessionConf"`              // Kyuubi/Spark 会话配置
 	TransportMode string            `yaml:"transportMode"`            // binary 或 http，默认 binary
+
+	// 连接池配置 - 对于 Spark on K8s 弹性资源场景非常重要
+	// 如果不配置，默认会保持空闲连接，导致 K8s 上的 Spark executor 无法释放
+	MaxOpenConns    int    `yaml:"maxOpenConns"`    // 最大打开连接数，默认 5
+	MaxIdleConns    int    `yaml:"maxIdleConns"`    // 最大空闲连接数，默认 0（不保持空闲连接，释放 K8s 资源）
+	ConnMaxLifetime string `yaml:"connMaxLifetime"` // 连接最大生命周期，默认 30m
+	ConnMaxIdleTime string `yaml:"connMaxIdleTime"` // 连接最大空闲时间，默认 5m（空闲超过此时间的连接会被关闭）
 }
 
 func (r Config) SourceConfigKind() string {
@@ -141,10 +148,36 @@ func initKyuubiConnectionPool(ctx context.Context, tracer trace.Tracer, config C
 	}
 
 	// 配置连接池
-	// Kyuubi 连接启动慢，成本高，所以连接数不要太多
-	db.SetMaxOpenConns(5)                   // 最大打开连接数
-	db.SetMaxIdleConns(2)                   // 最大空闲连接数
-	db.SetConnMaxLifetime(30 * time.Minute) // 连接最大生命周期
+	// 对于 Spark on K8s 弹性资源场景，默认不保持空闲连接以释放 K8s 资源
+	maxOpenConns := config.MaxOpenConns
+	if maxOpenConns <= 0 {
+		maxOpenConns = 5 // 默认最大打开连接数
+	}
+	db.SetMaxOpenConns(maxOpenConns)
+
+	// MaxIdleConns: 默认为 0，不保持空闲连接
+	// 这样当查询完成后，连接会被关闭，Spark executor 可以释放
+	maxIdleConns := config.MaxIdleConns // 默认 0
+	db.SetMaxIdleConns(maxIdleConns)
+
+	// ConnMaxLifetime: 连接最大生命周期
+	connMaxLifetime := 30 * time.Minute
+	if config.ConnMaxLifetime != "" {
+		if d, err := time.ParseDuration(config.ConnMaxLifetime); err == nil {
+			connMaxLifetime = d
+		}
+	}
+	db.SetConnMaxLifetime(connMaxLifetime)
+
+	// ConnMaxIdleTime: 连接最大空闲时间（Go 1.15+）
+	// 空闲超过此时间的连接会被关闭，有助于释放 K8s 资源
+	connMaxIdleTime := 5 * time.Minute // 默认 5 分钟
+	if config.ConnMaxIdleTime != "" {
+		if d, err := time.ParseDuration(config.ConnMaxIdleTime); err == nil {
+			connMaxIdleTime = d
+		}
+	}
+	db.SetConnMaxIdleTime(connMaxIdleTime)
 
 	// 验证连接
 	if err := db.PingContext(ctx); err != nil {
