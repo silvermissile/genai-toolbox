@@ -1,0 +1,32 @@
+sources:
+  my-presto:
+    kind: presto
+    host: presto-server.example.com
+    port: 8080
+    user: ${PRESTO_USER}
+    catalog: hive
+    schema: default
+    queryTimeout: 5m
+    sslEnabled: false
+
+tools:
+  # 预定义查询
+  query-data:
+    kind: presto-sql
+    source: my-presto
+    description: 查询数据
+    statement: |
+      SELECT * FROM {{.table_name}} LIMIT {{.limit}}
+    templateParameters:
+      - name: table_name
+        type: string
+        required: true
+      - name: limit
+        type: integer
+        required: true
+
+  # 执行任意 SQL
+  run-query:
+    kind: presto-execute-sql
+    source: my-presto
+    description: 执行任意 Presto SQL 查询
