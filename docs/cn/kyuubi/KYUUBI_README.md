@@ -4,6 +4,15 @@
 
 本文档介绍如何在 genai-toolbox 项目中使用 Kyuubi 数据源，通过 AI Agent 查询 Kyuubi/Spark SQL 数据。
 
+## 📚 文档导航
+
+- **[KYUUBI_README.md](KYUUBI_README.md)** - 本文档：完整的集成指南和配置说明
+- **[KYUUBI_AGENT_SYSTEM_PROMPT.md](KYUUBI_AGENT_SYSTEM_PROMPT.md)** - 🤖 AI Agent 系统提示词：帮助 AI 正确选择和使用 Kyuubi 工具
+- **[KYUUBI_QUICKSTART.md](KYUUBI_QUICKSTART.md)** - 快速开始：5 分钟快速上手
+- **[KYUUBI_EXAMPLES.md](KYUUBI_EXAMPLES.md)** - 使用示例：各种场景的完整配置和 SQL 示例
+- **[KYUUBI_IMPLEMENTATION_SUMMARY.md](KYUUBI_IMPLEMENTATION_SUMMARY.md)** - 实现总结：技术细节和设计决策
+- **[kyuubi_go_client_design.md](kyuubi_go_client_design.md)** - 客户端设计：Go 客户端的详细设计文档
+
 ## 🎯 什么是 Kyuubi?
 
 [Apache Kyuubi](https://kyuubi.apache.org/) 是一个分布式多租户网关，为数据仓库和数据湖提供 Serverless SQL 能力。Kyuubi 支持：
@@ -564,6 +573,7 @@ sql := fmt.Sprintf("SELECT * FROM users WHERE name = '%s'", userInput)
 
 详细的技术设计和方案对比，请参考：
 - [Kyuubi Go 客户端技术方案](./kyuubi_go_client_design.md)
+- [Kyuubi Agent 系统提示词](./KYUUBI_AGENT_SYSTEM_PROMPT.md) - AI Agent 使用指南
 
 ## 🤝 贡献
 
