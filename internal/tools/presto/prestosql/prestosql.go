@@ -25,6 +25,7 @@ import (
 	"github.com/googleapis/genai-toolbox/internal/sources"
 	"github.com/googleapis/genai-toolbox/internal/tools"
 	"github.com/googleapis/genai-toolbox/internal/util/parameters"
+	"github.com/prestodb/presto-go-client/presto"
 )
 
 const kind string = "presto-sql"
@@ -155,8 +156,13 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 		out = append(out, vMap)
 	}
 
+	// 检查迭代错误
+	// 注意: presto-go-client 会返回 *presto.EOF 来标记查询结束，这不是真正的错误
 	if err := results.Err(); err != nil {
-		return nil, fmt.Errorf("errors encountered during row iteration: %w", err)
+		// 忽略 presto.EOF 错误（查询正常结束的标记）
+		if _, ok := err.(*presto.EOF); !ok {
+			return nil, fmt.Errorf("errors encountered during row iteration: %w", err)
+		}
 	}
 
 	return out, nil
