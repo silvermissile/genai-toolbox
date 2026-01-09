@@ -19,7 +19,7 @@ require (
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.53.0
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace v1.30.0
 	github.com/apache/cassandra-gocql-driver/v2 v2.0.0
-	github.com/beltran/gohive/v2 v2.0.0-rc2
+	github.com/beltran/gohive/v2 v2.0.0
 	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/couchbase/gocb/v2 v2.11.1
 	github.com/couchbase/tools-common/http v1.0.9
@@ -204,8 +204,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-// Use forked gohive with HiveConfiguration fix (one line fix in v2/driver.go)
-// See: https://github.com/beltran/gohive/pull/259
-// Remove this replace directive once the fix is merged upstream
-replace github.com/beltran/gohive/v2 => github.com/silvermissile/gohive/v2 v2.0.0-20251226093343-357f1af3885e
