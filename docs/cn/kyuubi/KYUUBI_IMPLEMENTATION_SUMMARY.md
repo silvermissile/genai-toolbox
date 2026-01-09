@@ -494,6 +494,7 @@ go build .
 
 # 或使用 go run
 go run . -a 0.0.0.0 --log-level debug --ui --tools-folder /path/to/config
+go run . -a 0.0.0.0 --log-level debug --ui --tools-folder /data/github/genai-toolbox/config
 ```
 
 ### 2. 使用示例
