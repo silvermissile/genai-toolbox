@@ -16,20 +16,22 @@ package clickhouse
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
+	"net/http"
 
 	yaml "github.com/goccy/go-yaml"
+	"github.com/googleapis/genai-toolbox/internal/embeddingmodels"
 	"github.com/googleapis/genai-toolbox/internal/sources"
 	"github.com/googleapis/genai-toolbox/internal/tools"
+	"github.com/googleapis/genai-toolbox/internal/util"
 	"github.com/googleapis/genai-toolbox/internal/util/parameters"
 )
 
-const listDatabasesKind string = "clickhouse-list-databases"
+const listDatabasesType string = "clickhouse-list-databases"
 
 func init() {
-	if !tools.Register(listDatabasesKind, newListDatabasesConfig) {
-		panic(fmt.Sprintf("tool kind %q already registered", listDatabasesKind))
+	if !tools.Register(listDatabasesType, newListDatabasesConfig) {
+		panic(fmt.Sprintf("tool type %q already registered", listDatabasesType))
 	}
 }
 
@@ -42,12 +44,12 @@ func newListDatabasesConfig(ctx context.Context, name string, decoder *yaml.Deco
 }
 
 type compatibleSource interface {
-	ClickHousePool() *sql.DB
+	RunSQL(context.Context, string, parameters.ParamValues) (any, error)
 }
 
 type Config struct {
 	Name         string                `yaml:"name" validate:"required"`
-	Kind         string                `yaml:"kind" validate:"required"`
+	Type         string                `yaml:"type" validate:"required"`
 	Source       string                `yaml:"source" validate:"required"`
 	Description  string                `yaml:"description" validate:"required"`
 	AuthRequired []string              `yaml:"authRequired"`
@@ -56,8 +58,8 @@ type Config struct {
 
 var _ tools.ToolConfig = Config{}
 
-func (cfg Config) ToolConfigKind() string {
-	return listDatabasesKind
+func (cfg Config) ToolConfigType() string {
+	return listDatabasesType
 }
 
 func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error) {
@@ -86,42 +88,25 @@ func (t Tool) ToConfig() tools.ToolConfig {
 	return t.Config
 }
 
-func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, params parameters.ParamValues, token tools.AccessToken) (any, error) {
-	source, err := tools.GetCompatibleSource[compatibleSource](resourceMgr, t.Source, t.Name, t.Kind)
+func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, params parameters.ParamValues, token tools.AccessToken) (any, util.ToolboxError) {
+	source, err := tools.GetCompatibleSource[compatibleSource](resourceMgr, t.Source, t.Name, t.Type)
 	if err != nil {
-		return nil, err
+		return nil, util.NewClientServerError("source used is not compatible with the tool", http.StatusInternalServerError, err)
 	}
 
 	// Query to list all databases
 	query := "SHOW DATABASES"
 
-	results, err := source.ClickHousePool().QueryContext(ctx, query)
+	out, err := source.RunSQL(ctx, query, nil)
 	if err != nil {
-		return nil, fmt.Errorf("unable to execute query: %w", err)
-	}
-	defer results.Close()
-
-	var databases []map[string]any
-	for results.Next() {
-		var dbName string
-		err := results.Scan(&dbName)
-		if err != nil {
-			return nil, fmt.Errorf("unable to parse row: %w", err)
-		}
-		databases = append(databases, map[string]any{
-			"name": dbName,
-		})
+		return nil, util.ProcessGeneralError(err)
 	}
 
-	if err := results.Err(); err != nil {
-		return nil, fmt.Errorf("errors encountered by results.Scan: %w", err)
-	}
-
-	return databases, nil
+	return out, nil
 }
 
-func (t Tool) ParseParams(data map[string]any, claims map[string]map[string]any) (parameters.ParamValues, error) {
-	return parameters.ParseParams(t.AllParams, data, claims)
+func (t Tool) EmbedParams(ctx context.Context, paramValues parameters.ParamValues, embeddingModelsMap map[string]embeddingmodels.EmbeddingModel) (parameters.ParamValues, error) {
+	return parameters.EmbedParams(ctx, t.AllParams, paramValues, embeddingModelsMap, nil)
 }
 
 func (t Tool) Manifest() tools.Manifest {
@@ -142,4 +127,8 @@ func (t Tool) RequiresClientAuthorization(resourceMgr tools.SourceProvider) (boo
 
 func (t Tool) GetAuthTokenHeaderName(resourceMgr tools.SourceProvider) (string, error) {
 	return "Authorization", nil
+}
+
+func (t Tool) GetParameters() parameters.Parameters {
+	return t.Parameters
 }

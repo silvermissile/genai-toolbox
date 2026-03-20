@@ -15,7 +15,9 @@ package cloudmonitoring
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/goccy/go-yaml"
@@ -27,14 +29,14 @@ import (
 	monitoring "google.golang.org/api/monitoring/v3"
 )
 
-const SourceKind string = "cloud-monitoring"
+const SourceType string = "cloud-monitoring"
 
 // validate interface
 var _ sources.SourceConfig = Config{}
 
 func init() {
-	if !sources.Register(SourceKind, newConfig) {
-		panic(fmt.Sprintf("source kind %q already registered", SourceKind))
+	if !sources.Register(SourceType, newConfig) {
+		panic(fmt.Sprintf("source type %q already registered", SourceType))
 	}
 }
 
@@ -48,12 +50,12 @@ func newConfig(ctx context.Context, name string, decoder *yaml.Decoder) (sources
 
 type Config struct {
 	Name           string `yaml:"name" validate:"required"`
-	Kind           string `yaml:"kind" validate:"required"`
+	Type           string `yaml:"type" validate:"required"`
 	UseClientOAuth bool   `yaml:"useClientOAuth"`
 }
 
-func (r Config) SourceConfigKind() string {
-	return SourceKind
+func (r Config) SourceConfigType() string {
+	return SourceType
 }
 
 // Initialize initializes a Cloud Monitoring Source instance.
@@ -97,8 +99,8 @@ type Source struct {
 	userAgent string
 }
 
-func (s *Source) SourceKind() string {
-	return SourceKind
+func (s *Source) SourceType() string {
+	return SourceType
 }
 
 func (s *Source) ToConfig() sources.SourceConfig {
@@ -130,4 +132,45 @@ func (s *Source) GetClient(ctx context.Context, accessToken string) (*http.Clien
 
 func (s *Source) UseClientAuthorization() bool {
 	return s.UseClientOAuth
+}
+
+func (s *Source) RunQuery(projectID, query string) (any, error) {
+	url := fmt.Sprintf("%s/v1/projects/%s/location/global/prometheus/api/v1/query", s.BaseURL(), projectID)
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	q := req.URL.Query()
+	q.Add("query", query)
+	req.URL.RawQuery = q.Encode()
+
+	req.Header.Set("User-Agent", s.UserAgent())
+
+	resp, err := s.Client().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("request failed: %s, body: %s", resp.Status, string(body))
+	}
+
+	if len(body) == 0 {
+		return nil, nil
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal json: %w, body: %s", err, string(body))
+	}
+
+	return result, nil
 }

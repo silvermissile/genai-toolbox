@@ -17,45 +17,48 @@ package postgreslisttablespaces
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	yaml "github.com/goccy/go-yaml"
+	"github.com/googleapis/genai-toolbox/internal/embeddingmodels"
 	"github.com/googleapis/genai-toolbox/internal/sources"
 	"github.com/googleapis/genai-toolbox/internal/tools"
+	"github.com/googleapis/genai-toolbox/internal/util"
 	"github.com/googleapis/genai-toolbox/internal/util/parameters"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const kind string = "postgres-list-tablespaces"
+const resourceType string = "postgres-list-tablespaces"
 
 const listTableSpacesStatement = `
-	WITH
-	tablespace_info AS (
-		SELECT
-		spcname AS tablespace_name,
-		pg_catalog.pg_get_userbyid(spcowner) AS owner_name,
-		CASE
-			WHEN pg_catalog.has_tablespace_privilege(oid, 'CREATE') THEN pg_tablespace_size(oid)
-			ELSE NULL
-			END AS size_in_bytes,
-		oid,
-		spcacl,
-		spcoptions
-		FROM
-		pg_tablespace
-	)
-	SELECT *
-	FROM
-		tablespace_info
-	WHERE
-		($1::text IS NULL OR tablespace_name LIKE '%' || $1::text || '%')
-	ORDER BY
-		tablespace_name
-	LIMIT COALESCE($2::int, 50);
+    WITH
+    tablespace_info AS (
+        SELECT
+        spcname AS tablespace_name,
+        pg_catalog.pg_get_userbyid(spcowner) AS owner_name,
+        CASE
+            WHEN pg_catalog.has_tablespace_privilege(oid, 'CREATE') THEN pg_tablespace_size(oid)
+            ELSE NULL
+            END AS size_in_bytes,
+        oid,
+        spcacl,
+        spcoptions
+        FROM
+        pg_tablespace
+    )
+    SELECT *
+    FROM
+        tablespace_info
+    WHERE
+        ($1::text IS NULL OR tablespace_name LIKE '%' || $1::text || '%')
+    ORDER BY
+        tablespace_name
+    LIMIT COALESCE($2::int, 50);
 `
 
 func init() {
-	if !tools.Register(kind, newConfig) {
-		panic(fmt.Sprintf("tool kind %q already registered", kind))
+	if !tools.Register(resourceType, newConfig) {
+		panic(fmt.Sprintf("tool type %q already registered", resourceType))
 	}
 }
 
@@ -69,21 +72,21 @@ func newConfig(ctx context.Context, name string, decoder *yaml.Decoder) (tools.T
 
 type compatibleSource interface {
 	PostgresPool() *pgxpool.Pool
+	RunSQL(context.Context, string, []any) (any, error)
 }
 
 type Config struct {
 	Name         string   `yaml:"name" validate:"required"`
-	Kind         string   `yaml:"kind" validate:"required"`
+	Type         string   `yaml:"type" validate:"required"`
 	Source       string   `yaml:"source" validate:"required"`
 	Description  string   `yaml:"description"`
 	AuthRequired []string `yaml:"authRequired"`
 }
 
-// validate interface
 var _ tools.ToolConfig = Config{}
 
-func (cfg Config) ToolConfigKind() string {
-	return kind
+func (cfg Config) ToolConfigType() string {
+	return resourceType
 }
 
 func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error) {
@@ -97,7 +100,6 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 	}
 	mcpManifest := tools.GetMcpManifest(cfg.Name, description, cfg.AuthRequired, allParameters, nil)
 
-	// finish tool setup
 	return Tool{
 		Config:    cfg,
 		allParams: allParameters,
@@ -110,7 +112,6 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 	}, nil
 }
 
-// validate interface
 var _ tools.Tool = Tool{}
 
 type Tool struct {
@@ -124,53 +125,32 @@ func (t Tool) ToConfig() tools.ToolConfig {
 	return t.Config
 }
 
-func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, params parameters.ParamValues, accessToken tools.AccessToken) (any, error) {
-	source, err := tools.GetCompatibleSource[compatibleSource](resourceMgr, t.Source, t.Name, t.Kind)
+func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, params parameters.ParamValues, accessToken tools.AccessToken) (any, util.ToolboxError) {
+	source, err := tools.GetCompatibleSource[compatibleSource](resourceMgr, t.Source, t.Name, t.Type)
 	if err != nil {
-		return nil, err
+		return nil, util.NewClientServerError("source used is not compatible with the tool", http.StatusInternalServerError, err)
 	}
 
 	paramsMap := params.AsMap()
 
 	tablespaceName, ok := paramsMap["tablespace_name"].(string)
 	if !ok {
-		return nil, fmt.Errorf("invalid 'tablespace_name' parameter; expected a string")
+		return nil, util.NewAgentError("invalid 'tablespace_name' parameter; expected a string", nil)
 	}
 	limit, ok := paramsMap["limit"].(int)
 	if !ok {
-		return nil, fmt.Errorf("invalid 'limit' parameter; expected an integer")
+		return nil, util.NewAgentError("invalid 'limit' parameter; expected an integer", nil)
 	}
 
-	results, err := source.PostgresPool().Query(ctx, listTableSpacesStatement, tablespaceName, limit)
+	resp, err := source.RunSQL(ctx, listTableSpacesStatement, []any{tablespaceName, limit})
 	if err != nil {
-		return nil, fmt.Errorf("unable to execute query: %w", err)
+		return nil, util.ProcessGeneralError(err)
 	}
-	defer results.Close()
-
-	fields := results.FieldDescriptions()
-	var out []map[string]any
-
-	for results.Next() {
-		values, err := results.Values()
-		if err != nil {
-			return nil, fmt.Errorf("unable to parse row: %w", err)
-		}
-		rowMap := make(map[string]any)
-		for i, field := range fields {
-			rowMap[string(field.Name)] = values[i]
-		}
-		out = append(out, rowMap)
-	}
-	// this will catch actual query execution errors
-	if err := results.Err(); err != nil {
-		return nil, fmt.Errorf("unable to execute query: %w", err)
-	}
-
-	return out, nil
+	return resp, nil
 }
 
-func (t Tool) ParseParams(data map[string]any, claims map[string]map[string]any) (parameters.ParamValues, error) {
-	return parameters.ParseParams(t.allParams, data, claims)
+func (t Tool) EmbedParams(ctx context.Context, paramValues parameters.ParamValues, embeddingModelsMap map[string]embeddingmodels.EmbeddingModel) (parameters.ParamValues, error) {
+	return parameters.EmbedParams(ctx, t.allParams, paramValues, embeddingModelsMap, nil)
 }
 
 func (t Tool) Manifest() tools.Manifest {
@@ -191,4 +171,8 @@ func (t Tool) RequiresClientAuthorization(resourceMgr tools.SourceProvider) (boo
 
 func (t Tool) GetAuthTokenHeaderName(resourceMgr tools.SourceProvider) (string, error) {
 	return "Authorization", nil
+}
+
+func (t Tool) GetParameters() parameters.Parameters {
+	return t.allParams
 }

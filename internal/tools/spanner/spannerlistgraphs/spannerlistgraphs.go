@@ -16,23 +16,24 @@ package spannerlistgraphs
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"cloud.google.com/go/spanner"
 	yaml "github.com/goccy/go-yaml"
+	"github.com/googleapis/genai-toolbox/internal/embeddingmodels"
 	"github.com/googleapis/genai-toolbox/internal/sources"
 	"github.com/googleapis/genai-toolbox/internal/tools"
+	"github.com/googleapis/genai-toolbox/internal/util"
 	"github.com/googleapis/genai-toolbox/internal/util/parameters"
-	"google.golang.org/api/iterator"
 )
 
-const kind string = "spanner-list-graphs"
+const resourceType string = "spanner-list-graphs"
 
 func init() {
-	if !tools.Register(kind, newConfig) {
-		panic(fmt.Sprintf("tool kind %q already registered", kind))
+	if !tools.Register(resourceType, newConfig) {
+		panic(fmt.Sprintf("tool type %q already registered", resourceType))
 	}
 }
 
@@ -47,11 +48,12 @@ func newConfig(ctx context.Context, name string, decoder *yaml.Decoder) (tools.T
 type compatibleSource interface {
 	SpannerClient() *spanner.Client
 	DatabaseDialect() string
+	RunSQL(context.Context, bool, string, map[string]any) (any, error)
 }
 
 type Config struct {
 	Name         string   `yaml:"name" validate:"required"`
-	Kind         string   `yaml:"kind" validate:"required"`
+	Type         string   `yaml:"type" validate:"required"`
 	Source       string   `yaml:"source" validate:"required"`
 	Description  string   `yaml:"description"`
 	AuthRequired []string `yaml:"authRequired"`
@@ -60,8 +62,8 @@ type Config struct {
 // validate interface
 var _ tools.ToolConfig = Config{}
 
-func (cfg Config) ToolConfigKind() string {
-	return kind
+func (cfg Config) ToolConfigType() string {
+	return resourceType
 }
 
 func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error) {
@@ -105,48 +107,15 @@ type Tool struct {
 	mcpManifest tools.McpManifest
 }
 
-// processRows iterates over the spanner.RowIterator and converts each row to a map[string]any.
-func processRows(iter *spanner.RowIterator) ([]any, error) {
-	var out []any
-	defer iter.Stop()
-
-	for {
-		row, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("unable to parse row: %w", err)
-		}
-
-		vMap := make(map[string]any)
-		cols := row.ColumnNames()
-		for i, c := range cols {
-			if c == "object_details" {
-				jsonString := row.ColumnValue(i).AsInterface().(string)
-				var details map[string]interface{}
-				if err := json.Unmarshal([]byte(jsonString), &details); err != nil {
-					return nil, fmt.Errorf("unable to unmarshal JSON: %w", err)
-				}
-				vMap[c] = details
-			} else {
-				vMap[c] = row.ColumnValue(i)
-			}
-		}
-		out = append(out, vMap)
-	}
-	return out, nil
-}
-
-func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, params parameters.ParamValues, accessToken tools.AccessToken) (any, error) {
-	source, err := tools.GetCompatibleSource[compatibleSource](resourceMgr, t.Source, t.Name, t.Kind)
+func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, params parameters.ParamValues, accessToken tools.AccessToken) (any, util.ToolboxError) {
+	source, err := tools.GetCompatibleSource[compatibleSource](resourceMgr, t.Source, t.Name, t.Type)
 	if err != nil {
-		return nil, err
+		return nil, util.NewClientServerError("source used is not compatible with the tool", http.StatusInternalServerError, err)
 	}
 
 	// Check dialect here at RUNTIME instead of startup
 	if strings.ToLower(source.DatabaseDialect()) != "googlesql" {
-		return nil, fmt.Errorf("operation not supported: The 'spanner-list-graphs' tool is only available for GoogleSQL dialect databases. Your current database dialect is '%s'", source.DatabaseDialect())
+		return nil, util.NewAgentError(fmt.Sprintf("operation not supported: The 'spanner-list-graphs' tool is only available for GoogleSQL dialect databases. Your current database dialect is '%s'", source.DatabaseDialect()), nil)
 	}
 
 	paramsMap := params.AsMap()
@@ -161,24 +130,15 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 		"graph_names":   graphNames,
 		"output_format": outputFormat,
 	}
-
-	stmt := spanner.Statement{
-		SQL:    googleSQLStatement,
-		Params: stmtParams,
-	}
-
-	// Execute the query (read-only)
-	iter := source.SpannerClient().Single().Query(ctx, stmt)
-	results, err := processRows(iter)
+	resp, err := source.RunSQL(ctx, true, googleSQLStatement, stmtParams)
 	if err != nil {
-		return nil, fmt.Errorf("unable to execute query: %w", err)
+		return nil, util.ProcessGcpError(err)
 	}
-
-	return results, nil
+	return resp, nil
 }
 
-func (t Tool) ParseParams(data map[string]any, claims map[string]map[string]any) (parameters.ParamValues, error) {
-	return parameters.ParseParams(t.AllParams, data, claims)
+func (t Tool) EmbedParams(ctx context.Context, paramValues parameters.ParamValues, embeddingModelsMap map[string]embeddingmodels.EmbeddingModel) (parameters.ParamValues, error) {
+	return parameters.EmbedParams(ctx, t.AllParams, paramValues, embeddingModelsMap, nil)
 }
 
 func (t Tool) Manifest() tools.Manifest {
@@ -203,6 +163,10 @@ func (t Tool) ToConfig() tools.ToolConfig {
 
 func (t Tool) GetAuthTokenHeaderName(resourceMgr tools.SourceProvider) (string, error) {
 	return "Authorization", nil
+}
+
+func (t Tool) GetParameters() parameters.Parameters {
+	return t.AllParams
 }
 
 // GoogleSQL statement for listing graphs

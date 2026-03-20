@@ -56,16 +56,16 @@ To initialize the application default credential run `gcloud auth login
 ## Example
 
 ```yaml
-sources:
-    my-looker-source:
-        kind: looker
-        base_url: http://looker.example.com
-        client_id: ${LOOKER_CLIENT_ID}
-        client_secret: ${LOOKER_CLIENT_SECRET}
-        project: ${LOOKER_PROJECT}
-        location: ${LOOKER_LOCATION}
-        verify_ssl: true
-        timeout: 600s
+kind: sources
+name: my-looker-source
+type: looker
+base_url: http://looker.example.com
+client_id: ${LOOKER_CLIENT_ID}
+client_secret: ${LOOKER_CLIENT_SECRET}
+project: ${LOOKER_PROJECT}
+location: ${LOOKER_LOCATION}
+verify_ssl: true
+timeout: 600s
 ```
 
 The Looker base url will look like "https://looker.example.com", don't include
@@ -93,7 +93,7 @@ instead of hardcoding your secrets into the configuration file.
 
 | **field**            | **type** | **required** | **description**                                                                                                                                     |
 |----------------------|:--------:|:------------:|-----------------------------------------------------------------------------------------------------------------------------------------------------|
-| kind                 |  string  |     true     | Must be "looker".                                                                                                                                   |
+| type                 |  string  |     true     | Must be "looker".                                                                                                                                   |
 | base_url             |  string  |     true     | The URL of your Looker server with no trailing /.                                                                                                   |
 | client_id            |  string  |    false     | The client id assigned by Looker.                                                                                                                   |
 | client_secret        |  string  |    false     | The client secret assigned by Looker.                                                                                                               |
@@ -101,7 +101,7 @@ instead of hardcoding your secrets into the configuration file.
 | project              |  string  |    false     | The project id to use in Google Cloud.                                                                                                              |
 | location             |  string  |    false     | The location to use in Google Cloud. (default: us)                                                                                                  |
 | timeout              |  string  |    false     | Maximum time to wait for query execution (e.g. "30s", "2m"). By default, 120s is applied.                                                           |
-| use_client_oauth     |  string  |    false     | Use OAuth tokens instead of client_id and client_secret. (default: false) If a header name is provided, it will be used instead of "Authorization". |
+| use_client_oauth     |  string  |    false     | If set to `'true'`, forwards the client's OAuth access token from the default `Authorization` header. If set to a custom header name (e.g., `X-Looker-Auth`), that header will be used instead. An empty string or `'false'` disables this feature. Defaults to `""` (disabled). |
 | show_hidden_models   |  string  |    false     | Show or hide hidden models. (default: true)                                                                                                         |
 | show_hidden_explores |  string  |    false     | Show or hide hidden explores. (default: true)                                                                                                       |
 | show_hidden_fields   |  string  |    false     | Show or hide hidden fields. (default: true)                                                                                                         |

@@ -19,6 +19,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/googleapis/genai-toolbox/internal/auth"
+	"github.com/googleapis/genai-toolbox/internal/embeddingmodels"
 	"github.com/googleapis/genai-toolbox/internal/prompts"
 	"github.com/googleapis/genai-toolbox/internal/server/resources"
 	"github.com/googleapis/genai-toolbox/internal/sources"
@@ -31,11 +32,12 @@ func TestUpdateServer(t *testing.T) {
 		"example-source": &alloydbpg.Source{
 			Config: alloydbpg.Config{
 				Name: "example-alloydb-source",
-				Kind: "alloydb-postgres",
+				Type: "alloydb-postgres",
 			},
 		},
 	}
 	newAuth := map[string]auth.AuthService{"example-auth": nil}
+	newEmbeddingModels := map[string]embeddingmodels.EmbeddingModel{"example-model": nil}
 	newTools := map[string]tools.Tool{"example-tool": nil}
 	newToolsets := map[string]tools.Toolset{
 		"example-toolset": {
@@ -54,7 +56,7 @@ func TestUpdateServer(t *testing.T) {
 			Prompts: []*prompts.Prompt{},
 		},
 	}
-	resMgr := resources.NewResourceManager(newSources, newAuth, newTools, newToolsets, newPrompts, newPromptsets)
+	resMgr := resources.NewResourceManager(newSources, newAuth, newEmbeddingModels, newTools, newToolsets, newPrompts, newPromptsets)
 
 	gotSource, _ := resMgr.GetSource("example-source")
 	if diff := cmp.Diff(gotSource, newSources["example-source"]); diff != "" {
@@ -90,12 +92,12 @@ func TestUpdateServer(t *testing.T) {
 		"example-source2": &alloydbpg.Source{
 			Config: alloydbpg.Config{
 				Name: "example-alloydb-source2",
-				Kind: "alloydb-postgres",
+				Type: "alloydb-postgres",
 			},
 		},
 	}
 
-	resMgr.SetResources(updateSource, newAuth, newTools, newToolsets, newPrompts, newPromptsets)
+	resMgr.SetResources(updateSource, newAuth, newEmbeddingModels, newTools, newToolsets, newPrompts, newPromptsets)
 	gotSource, _ = resMgr.GetSource("example-source2")
 	if diff := cmp.Diff(gotSource, updateSource["example-source2"]); diff != "" {
 		t.Errorf("error updating server, sources (-want +got):\n%s", diff)

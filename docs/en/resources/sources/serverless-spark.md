@@ -25,6 +25,12 @@ Apache Spark.
   Create a Serverless Spark PySpark batch operation.
 - [`serverless-spark-create-spark-batch`](../tools/serverless-spark/serverless-spark-create-spark-batch.md)
   Create a Serverless Spark Java batch operation.
+- [`serverless-spark-list-sessions`](../tools/serverless-spark/serverless-spark-list-sessions.md)
+  List and filter Serverless Spark sessions.
+- [`serverless-spark-get-session`](../tools/serverless-spark/serverless-spark-get-session.md)
+  Get a Serverless Spark session.
+- [`serverless-spark-get-session-template`](../tools/serverless-spark/serverless-spark-get-session-template.md)
+  Get a Serverless Spark session template.
 
 ## Requirements
 
@@ -49,17 +55,17 @@ set up your ADC.
 ## Example
 
 ```yaml
-sources:
-  my-serverless-spark-source:
-    kind: serverless-spark
-    project: my-project-id
-    location: us-central1
+kind: sources
+name: my-serverless-spark-source
+type: serverless-spark
+project: my-project-id
+location: us-central1
 ```
 
 ## Reference
 
 | **field** | **type** | **required** | **description**                                                   |
 | --------- | :------: | :----------: | ----------------------------------------------------------------- |
-| kind      |  string  |     true     | Must be "serverless-spark".                                       |
+| type      |  string  |     true     | Must be "serverless-spark".                                       |
 | project   |  string  |     true     | ID of the GCP project with Serverless for Apache Spark resources. |
 | location  |  string  |     true     | Location containing Serverless for Apache Spark resources.        |

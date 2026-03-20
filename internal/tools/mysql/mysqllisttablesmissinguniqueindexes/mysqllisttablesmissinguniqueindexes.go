@@ -18,43 +18,44 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/http"
 
 	yaml "github.com/goccy/go-yaml"
+	"github.com/googleapis/genai-toolbox/internal/embeddingmodels"
 	"github.com/googleapis/genai-toolbox/internal/sources"
 	"github.com/googleapis/genai-toolbox/internal/tools"
-	"github.com/googleapis/genai-toolbox/internal/tools/mysql/mysqlcommon"
 	"github.com/googleapis/genai-toolbox/internal/util"
 	"github.com/googleapis/genai-toolbox/internal/util/parameters"
 )
 
-const kind string = "mysql-list-tables-missing-unique-indexes"
+const resourceType string = "mysql-list-tables-missing-unique-indexes"
 
 const listTablesMissingUniqueIndexesStatement = `
-	SELECT
-		tab.table_schema AS table_schema,
-		tab.table_name AS table_name
-	FROM
-		information_schema.tables tab
-		LEFT JOIN
-		information_schema.table_constraints tco
-		ON
-			tab.table_schema = tco.table_schema
-			AND tab.table_name = tco.table_name
-			AND tco.constraint_type IN ('PRIMARY KEY', 'UNIQUE')
-	WHERE
-		tco.constraint_type IS NULL
-		AND tab.table_schema NOT IN('mysql', 'information_schema', 'performance_schema', 'sys')
-		AND tab.table_type = 'BASE TABLE'
-		AND (COALESCE(?, '') = '' OR tab.table_schema = ?)
-	ORDER BY
-		tab.table_schema,
-		tab.table_name
-	LIMIT ?;
+    SELECT
+        tab.table_schema AS table_schema,
+        tab.table_name AS table_name
+    FROM
+        information_schema.tables tab
+        LEFT JOIN
+        information_schema.table_constraints tco
+        ON
+            tab.table_schema = tco.table_schema
+            AND tab.table_name = tco.table_name
+            AND tco.constraint_type IN ('PRIMARY KEY', 'UNIQUE')
+    WHERE
+        tco.constraint_type IS NULL
+        AND tab.table_schema NOT IN('mysql', 'information_schema', 'performance_schema', 'sys')
+        AND tab.table_type = 'BASE TABLE'
+        AND (COALESCE(?, '') = '' OR tab.table_schema = ?)
+    ORDER BY
+        tab.table_schema,
+        tab.table_name
+    LIMIT ?;
 `
 
 func init() {
-	if !tools.Register(kind, newConfig) {
-		panic(fmt.Sprintf("tool kind %q already registered", kind))
+	if !tools.Register(resourceType, newConfig) {
+		panic(fmt.Sprintf("tool type %q already registered", resourceType))
 	}
 }
 
@@ -68,11 +69,12 @@ func newConfig(ctx context.Context, name string, decoder *yaml.Decoder) (tools.T
 
 type compatibleSource interface {
 	MySQLPool() *sql.DB
+	RunSQL(context.Context, string, []any) (any, error)
 }
 
 type Config struct {
 	Name         string   `yaml:"name" validate:"required"`
-	Kind         string   `yaml:"kind" validate:"required"`
+	Type         string   `yaml:"type" validate:"required"`
 	Source       string   `yaml:"source" validate:"required"`
 	Description  string   `yaml:"description" validate:"required"`
 	AuthRequired []string `yaml:"authRequired"`
@@ -81,8 +83,8 @@ type Config struct {
 // validate interface
 var _ tools.ToolConfig = Config{}
 
-func (cfg Config) ToolConfigKind() string {
-	return kind
+func (cfg Config) ToolConfigType() string {
+	return resourceType
 }
 
 func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error) {
@@ -112,84 +114,38 @@ type Tool struct {
 	mcpManifest tools.McpManifest
 }
 
-func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, params parameters.ParamValues, accessToken tools.AccessToken) (any, error) {
-	source, err := tools.GetCompatibleSource[compatibleSource](resourceMgr, t.Source, t.Name, t.Kind)
+func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, params parameters.ParamValues, accessToken tools.AccessToken) (any, util.ToolboxError) {
+	source, err := tools.GetCompatibleSource[compatibleSource](resourceMgr, t.Source, t.Name, t.Type)
 	if err != nil {
-		return nil, err
+		return nil, util.NewClientServerError("source used is not compatible with the tool", http.StatusInternalServerError, err)
 	}
 
 	paramsMap := params.AsMap()
 
 	table_schema, ok := paramsMap["table_schema"].(string)
 	if !ok {
-		return nil, fmt.Errorf("invalid 'table_schema' parameter; expected a string")
+		return nil, util.NewAgentError("invalid 'table_schema' parameter; expected a string", nil)
 	}
 	limit, ok := paramsMap["limit"].(int)
 	if !ok {
-		return nil, fmt.Errorf("invalid 'limit' parameter; expected an integer")
+		return nil, util.NewAgentError("invalid 'limit' parameter; expected an integer", nil)
 	}
 
 	// Log the query executed for debugging.
 	logger, err := util.LoggerFromContext(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("error getting logger: %s", err)
+		return nil, util.NewClientServerError("error getting logger", http.StatusInternalServerError, err)
 	}
-	logger.DebugContext(ctx, fmt.Sprintf("executing `%s` tool query: %s", kind, listTablesMissingUniqueIndexesStatement))
-
-	results, err := source.MySQLPool().QueryContext(ctx, listTablesMissingUniqueIndexesStatement, table_schema, table_schema, limit)
+	logger.DebugContext(ctx, fmt.Sprintf("executing `%s` tool query: %s", resourceType, listTablesMissingUniqueIndexesStatement))
+	resp, err := source.RunSQL(ctx, listTablesMissingUniqueIndexesStatement, []any{table_schema, table_schema, limit})
 	if err != nil {
-		return nil, fmt.Errorf("unable to execute query: %w", err)
+		return nil, util.ProcessGeneralError(err)
 	}
-	defer results.Close()
-
-	cols, err := results.Columns()
-	if err != nil {
-		return nil, fmt.Errorf("unable to retrieve rows column name: %w", err)
-	}
-
-	// create an array of values for each column, which can be re-used to scan each row
-	rawValues := make([]any, len(cols))
-	values := make([]any, len(cols))
-	for i := range rawValues {
-		values[i] = &rawValues[i]
-	}
-
-	colTypes, err := results.ColumnTypes()
-	if err != nil {
-		return nil, fmt.Errorf("unable to get column types: %w", err)
-	}
-
-	var out []any
-	for results.Next() {
-		err := results.Scan(values...)
-		if err != nil {
-			return nil, fmt.Errorf("unable to parse row: %w", err)
-		}
-		vMap := make(map[string]any)
-		for i, name := range cols {
-			val := rawValues[i]
-			if val == nil {
-				vMap[name] = nil
-				continue
-			}
-
-			vMap[name], err = mysqlcommon.ConvertToType(colTypes[i], val)
-			if err != nil {
-				return nil, fmt.Errorf("errors encountered when converting values: %w", err)
-			}
-		}
-		out = append(out, vMap)
-	}
-
-	if err := results.Err(); err != nil {
-		return nil, fmt.Errorf("errors encountered during row iteration: %w", err)
-	}
-
-	return out, nil
+	return resp, nil
 }
 
-func (t Tool) ParseParams(data map[string]any, claims map[string]map[string]any) (parameters.ParamValues, error) {
-	return parameters.ParseParams(t.allParams, data, claims)
+func (t Tool) EmbedParams(ctx context.Context, paramValues parameters.ParamValues, embeddingModelsMap map[string]embeddingmodels.EmbeddingModel) (parameters.ParamValues, error) {
+	return parameters.EmbedParams(ctx, t.allParams, paramValues, embeddingModelsMap, nil)
 }
 
 func (t Tool) Manifest() tools.Manifest {
@@ -214,4 +170,8 @@ func (t Tool) ToConfig() tools.ToolConfig {
 
 func (t Tool) GetAuthTokenHeaderName(resourceMgr tools.SourceProvider) (string, error) {
 	return "Authorization", nil
+}
+
+func (t Tool) GetParameters() parameters.Parameters {
+	return t.allParams
 }

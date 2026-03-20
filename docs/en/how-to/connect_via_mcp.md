@@ -20,6 +20,7 @@ The native SDKs can be combined with MCP clients in many cases.
 
 Toolbox currently supports the following versions of MCP specification:
 
+* [2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25)
 * [2025-06-18](https://modelcontextprotocol.io/specification/2025-06-18)
 * [2025-03-26](https://modelcontextprotocol.io/specification/2025-03-26)
 * [2024-11-05](https://modelcontextprotocol.io/specification/2024-11-05)
@@ -174,5 +175,5 @@ testing and debugging Toolbox server.
 | Claude Desktop     | ✅         | <https://modelcontextprotocol.io/quickstart/user#1-download-claude-for-desktop> |
 | MCP Inspector      | ✅         | <https://github.com/modelcontextprotocol/inspector>                             |
 | Cursor             | ✅         | <https://docs.cursor.com/context/model-context-protocol>                        |
-| Windsurf           | ✅         | <https://docs.windsurf.com/windsurf/mcp>                                        |
+| Windsurf           | ✅         | <https://docs.windsurf.com/windsurf/cascade/mcp#model-context-protocol-mcp>                                        |
 | VS Code (Insiders) | ✅         | <https://code.visualstudio.com/docs/copilot/chat/mcp-servers>                   |

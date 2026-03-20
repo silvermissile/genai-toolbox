@@ -17,21 +17,21 @@ package neo4jexecutecypher
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/goccy/go-yaml"
+	"github.com/googleapis/genai-toolbox/internal/embeddingmodels"
 	"github.com/googleapis/genai-toolbox/internal/sources"
 	"github.com/googleapis/genai-toolbox/internal/tools"
-	"github.com/googleapis/genai-toolbox/internal/tools/neo4j/neo4jexecutecypher/classifier"
-	"github.com/googleapis/genai-toolbox/internal/tools/neo4j/neo4jschema/helpers"
+	"github.com/googleapis/genai-toolbox/internal/util"
 	"github.com/googleapis/genai-toolbox/internal/util/parameters"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
-const kind string = "neo4j-execute-cypher"
+const resourceType string = "neo4j-execute-cypher"
 
 func init() {
-	if !tools.Register(kind, newConfig) {
-		panic(fmt.Sprintf("tool kind %q already registered", kind))
+	if !tools.Register(resourceType, newConfig) {
+		panic(fmt.Sprintf("tool type %q already registered", resourceType))
 	}
 }
 
@@ -44,13 +44,13 @@ func newConfig(ctx context.Context, name string, decoder *yaml.Decoder) (tools.T
 }
 
 type compatibleSource interface {
-	Neo4jDriver() neo4j.DriverWithContext
-	Neo4jDatabase() string
+	Neo4jDatabase() string // kept to ensure neo4j source
+	RunQuery(context.Context, string, map[string]any, bool, bool) (any, error)
 }
 
 type Config struct {
 	Name         string   `yaml:"name" validate:"required"`
-	Kind         string   `yaml:"kind" validate:"required"`
+	Type         string   `yaml:"type" validate:"required"`
 	Source       string   `yaml:"source" validate:"required"`
 	Description  string   `yaml:"description" validate:"required"`
 	ReadOnly     bool     `yaml:"readOnly"`
@@ -60,8 +60,8 @@ type Config struct {
 // validate interface
 var _ tools.ToolConfig = Config{}
 
-func (cfg Config) ToolConfigKind() string {
-	return kind
+func (cfg Config) ToolConfigType() string {
+	return resourceType
 }
 
 func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error) {
@@ -80,7 +80,6 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 	t := Tool{
 		Config:      cfg,
 		Parameters:  params,
-		classifier:  classifier.NewQueryClassifier(),
 		manifest:    tools.Manifest{Description: cfg.Description, Parameters: params.Manifest(), AuthRequired: cfg.AuthRequired},
 		mcpManifest: mcpManifest,
 	}
@@ -93,89 +92,40 @@ var _ tools.Tool = Tool{}
 type Tool struct {
 	Config
 	Parameters  parameters.Parameters `yaml:"parameters"`
-	classifier  *classifier.QueryClassifier
 	manifest    tools.Manifest
 	mcpManifest tools.McpManifest
 }
 
-func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, params parameters.ParamValues, accessToken tools.AccessToken) (any, error) {
-	source, err := tools.GetCompatibleSource[compatibleSource](resourceMgr, t.Source, t.Name, t.Kind)
+func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, params parameters.ParamValues, accessToken tools.AccessToken) (any, util.ToolboxError) {
+	source, err := tools.GetCompatibleSource[compatibleSource](resourceMgr, t.Source, t.Name, t.Type)
 	if err != nil {
-		return nil, err
+		return nil, util.NewClientServerError("source used is not compatible with the tool", http.StatusInternalServerError, err)
 	}
 
 	paramsMap := params.AsMap()
 	cypherStr, ok := paramsMap["cypher"].(string)
 	if !ok {
-		return nil, fmt.Errorf("unable to cast cypher parameter %s", paramsMap["cypher"])
+		return nil, util.NewAgentError(fmt.Sprintf("unable to cast cypher parameter %s", paramsMap["cypher"]), nil)
 	}
 
 	if cypherStr == "" {
-		return nil, fmt.Errorf("parameter 'cypher' must be a non-empty string")
+		return nil, util.NewAgentError("parameter 'cypher' must be a non-empty string", nil)
 	}
 
 	dryRun, ok := paramsMap["dry_run"].(bool)
 	if !ok {
-		return nil, fmt.Errorf("unable to cast dry_run parameter %s", paramsMap["dry_run"])
+		return nil, util.NewAgentError(fmt.Sprintf("unable to cast dry_run parameter %s", paramsMap["dry_run"]), nil)
 	}
 
-	// validate the cypher query before executing
-	cf := t.classifier.Classify(cypherStr)
-	if cf.Error != nil {
-		return nil, cf.Error
-	}
-
-	if cf.Type == classifier.WriteQuery && t.ReadOnly {
-		return nil, fmt.Errorf("this tool is read-only and cannot execute write queries")
-	}
-
-	if dryRun {
-		// Add EXPLAIN to the beginning of the query to validate it without executing
-		cypherStr = "EXPLAIN " + cypherStr
-	}
-
-	config := neo4j.ExecuteQueryWithDatabase(source.Neo4jDatabase())
-	results, err := neo4j.ExecuteQuery(ctx, source.Neo4jDriver(), cypherStr, nil,
-		neo4j.EagerResultTransformer, config)
+	resp, err := source.RunQuery(ctx, cypherStr, nil, t.ReadOnly, dryRun)
 	if err != nil {
-		return nil, fmt.Errorf("unable to execute query: %w", err)
+		return nil, util.ProcessGeneralError(err)
 	}
-
-	// If dry run, return the summary information only
-	if dryRun {
-		summary := results.Summary
-		plan := summary.Plan()
-		execPlan := map[string]any{
-			"queryType":     cf.Type.String(),
-			"statementType": summary.StatementType(),
-			"operator":      plan.Operator(),
-			"arguments":     plan.Arguments(),
-			"identifiers":   plan.Identifiers(),
-			"childrenCount": len(plan.Children()),
-		}
-		if len(plan.Children()) > 0 {
-			execPlan["children"] = addPlanChildren(plan)
-		}
-		return []map[string]any{execPlan}, nil
-	}
-
-	var out []any
-	keys := results.Keys
-	records := results.Records
-
-	for _, record := range records {
-		vMap := make(map[string]any)
-		for col, value := range record.Values {
-			vMap[keys[col]] = helpers.ConvertValue(value)
-		}
-		out = append(out, vMap)
-	}
-
-	return out, nil
+	return resp, nil
 }
 
-func (t Tool) ParseParams(data map[string]any, claimsMap map[string]map[string]any) (parameters.ParamValues, error) {
-	return parameters.ParseParams(t.Parameters, data, claimsMap)
+func (t Tool) EmbedParams(ctx context.Context, paramValues parameters.ParamValues, embeddingModelsMap map[string]embeddingmodels.EmbeddingModel) (parameters.ParamValues, error) {
+	return parameters.EmbedParams(ctx, t.Parameters, paramValues, embeddingModelsMap, nil)
 }
 
 func (t Tool) Manifest() tools.Manifest {
@@ -194,28 +144,14 @@ func (t Tool) RequiresClientAuthorization(resourceMgr tools.SourceProvider) (boo
 	return false, nil
 }
 
-// Recursive function to add plan children
-func addPlanChildren(p neo4j.Plan) []map[string]any {
-	var children []map[string]any
-	for _, child := range p.Children() {
-		childMap := map[string]any{
-			"operator":       child.Operator(),
-			"arguments":      child.Arguments(),
-			"identifiers":    child.Identifiers(),
-			"children_count": len(child.Children()),
-		}
-		if len(child.Children()) > 0 {
-			childMap["children"] = addPlanChildren(child)
-		}
-		children = append(children, childMap)
-	}
-	return children
-}
-
 func (t Tool) ToConfig() tools.ToolConfig {
 	return t.Config
 }
 
 func (t Tool) GetAuthTokenHeaderName(resourceMgr tools.SourceProvider) (string, error) {
 	return "Authorization", nil
+}
+
+func (t Tool) GetParameters() parameters.Parameters {
+	return t.Parameters
 }

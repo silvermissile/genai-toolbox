@@ -4,7 +4,9 @@ package oracle
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -17,14 +19,14 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-const SourceKind string = "oracle"
+const SourceType string = "oracle"
 
 // validate interface
 var _ sources.SourceConfig = Config{}
 
 func init() {
-	if !sources.Register(SourceKind, newConfig) {
-		panic(fmt.Sprintf("source kind %q already registered", SourceKind))
+	if !sources.Register(SourceType, newConfig) {
+		panic(fmt.Sprintf("source type %q already registered", SourceType))
 	}
 }
 
@@ -44,7 +46,7 @@ func newConfig(ctx context.Context, name string, decoder *yaml.Decoder) (sources
 
 type Config struct {
 	Name             string `yaml:"name" validate:"required"`
-	Kind             string `yaml:"kind" validate:"required"`
+	Type             string `yaml:"type" validate:"required"`
 	ConnectionString string `yaml:"connectionString,omitempty"`
 	TnsAlias         string `yaml:"tnsAlias,omitempty"`
 	TnsAdmin         string `yaml:"tnsAdmin,omitempty"`
@@ -94,8 +96,8 @@ func (c Config) validate() error {
 	return nil
 }
 
-func (r Config) SourceConfigKind() string {
-	return SourceKind
+func (r Config) SourceConfigType() string {
+	return SourceType
 }
 
 func (r Config) Initialize(ctx context.Context, tracer trace.Tracer) (sources.Source, error) {
@@ -123,8 +125,8 @@ type Source struct {
 	DB *sql.DB
 }
 
-func (s *Source) SourceKind() string {
-	return SourceKind
+func (s *Source) SourceType() string {
+	return SourceType
 }
 
 func (s *Source) ToConfig() sources.SourceConfig {
@@ -135,9 +137,161 @@ func (s *Source) OracleDB() *sql.DB {
 	return s.DB
 }
 
+func (s *Source) RunSQL(ctx context.Context, statement string, params []any, readOnly bool) (any, error) {
+	if !readOnly {
+		result, err := s.OracleDB().ExecContext(ctx, statement, params...)
+		if err != nil {
+			return nil, fmt.Errorf("unable to execute DML statement: %w", err)
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return nil, fmt.Errorf("unable to get rows affected: %w", err)
+		}
+
+		return map[string]any{
+			"status":        "success",
+			"rows_affected": rowsAffected,
+		}, nil
+	}
+	rows, err := s.OracleDB().QueryContext(ctx, statement, params...)
+	if err != nil {
+		return nil, fmt.Errorf("unable to execute query: %w", err)
+	}
+	defer rows.Close()
+
+	// If Columns() errors, it might be a DDL/DML without an OUTPUT clause.
+	// We proceed, and results.Err() will catch actual query execution errors.
+	// 'out' will remain nil if cols is empty or err is not nil here.
+	cols, _ := rows.Columns()
+
+	// Get Column types
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("query execution error: %w", err)
+		}
+		return []any{}, nil
+	}
+
+	var out []any
+	for rows.Next() {
+		values := make([]any, len(cols))
+		for i, colType := range colTypes {
+			switch strings.ToUpper(colType.DatabaseTypeName()) {
+			case "NUMBER", "FLOAT", "BINARY_FLOAT", "BINARY_DOUBLE":
+				if _, scale, ok := colType.DecimalSize(); ok && scale == 0 {
+					// Scale is 0, treat it as an integer.
+					values[i] = new(sql.NullInt64)
+				} else {
+					// Scale is non-zero or unknown, treat
+					// it as a float.
+					values[i] = new(sql.NullFloat64)
+				}
+			case "DATE", "TIMESTAMP", "TIMESTAMP WITH TIME ZONE", "TIMESTAMP WITH LOCAL TIME ZONE":
+				values[i] = new(sql.NullTime)
+			case "JSON":
+				values[i] = new(sql.RawBytes)
+			default:
+				values[i] = new(sql.NullString)
+			}
+		}
+
+		if err := rows.Scan(values...); err != nil {
+			return nil, fmt.Errorf("unable to scan row: %w", err)
+		}
+
+		vMap := make(map[string]any)
+		for i, col := range cols {
+			receiver := values[i]
+
+			switch v := receiver.(type) {
+			case *sql.NullInt64:
+				if v.Valid {
+					vMap[col] = v.Int64
+				} else {
+					vMap[col] = nil
+				}
+			case *sql.NullFloat64:
+				if v.Valid {
+					vMap[col] = v.Float64
+				} else {
+					vMap[col] = nil
+				}
+			case *sql.NullString:
+				if v.Valid {
+					vMap[col] = v.String
+				} else {
+					vMap[col] = nil
+				}
+			case *sql.NullTime:
+				if v.Valid {
+					vMap[col] = v.Time
+				} else {
+					vMap[col] = nil
+				}
+			case *sql.RawBytes:
+				if *v != nil {
+					var unmarshaledData any
+					if err := json.Unmarshal(*v, &unmarshaledData); err != nil {
+						return nil, fmt.Errorf("unable to unmarshal json data for column %s", col)
+					}
+					vMap[col] = unmarshaledData
+				} else {
+					vMap[col] = nil
+				}
+			default:
+				return nil, fmt.Errorf("unexpected receiver type: %T", v)
+			}
+		}
+		out = append(out, vMap)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("errors encountered during query execution or row processing: %w", err)
+	}
+
+	return out, nil
+}
+
+func buildGoOraConnString(user, password, connectStringBase, walletLocation string) string {
+	userInfo := url.UserPassword(
+		decodePercentEncodedUserInfo(user),
+		decodePercentEncodedUserInfo(password),
+	).String()
+
+	base := fmt.Sprintf("oracle://%s@%s", userInfo, connectStringBase)
+	trimmedWalletLocation := strings.TrimSpace(walletLocation)
+	if trimmedWalletLocation == "" {
+		return base
+	}
+
+	q := url.Values{}
+	q.Set("ssl", "true")
+	q.Set("wallet", trimmedWalletLocation)
+
+	separator := "?"
+	if strings.Contains(connectStringBase, "?") {
+		separator = "&"
+		if strings.HasSuffix(base, "?") || strings.HasSuffix(base, "&") {
+			separator = ""
+		}
+	}
+
+	return fmt.Sprintf("%s%s%s", base, separator, q.Encode())
+}
+
+func decodePercentEncodedUserInfo(value string) string {
+	decoded, err := url.PathUnescape(value)
+	if err != nil {
+		return value
+	}
+	return decoded
+}
+
 func initOracleConnection(ctx context.Context, tracer trace.Tracer, config Config) (*sql.DB, error) {
 	//nolint:all // Reassigned ctx
-	ctx, span := sources.InitConnectionSpan(ctx, tracer, SourceKind, config.Name)
+	ctx, span := sources.InitConnectionSpan(ctx, tracer, SourceType, config.Name)
 	defer span.End()
 
 	logger, err := util.LoggerFromContext(ctx)
@@ -187,16 +341,11 @@ func initOracleConnection(ctx context.Context, tracer trace.Tracer, config Confi
 		// Use go-ora driver (pure Go)
 		driverName = "oracle"
 
-		user := config.User
-		password := config.Password
+		finalConnStr = buildGoOraConnString(config.User, config.Password, connectStringBase, config.WalletLocation)
 
 		if hasWallet {
-			finalConnStr = fmt.Sprintf("oracle://%s:%s@%s?ssl=true&wallet=%s",
-				user, password, connectStringBase, config.WalletLocation)
+			logger.DebugContext(ctx, fmt.Sprintf("Using go-ora driver (pure-Go) with wallet and serverString: %s\n", connectStringBase))
 		} else {
-			// Standard go-ora connection
-			finalConnStr = fmt.Sprintf("oracle://%s:%s@%s",
-				config.User, config.Password, connectStringBase)
 			logger.DebugContext(ctx, fmt.Sprintf("Using go-ora driver (pure-Go) with serverString: %s\n", connectStringBase))
 		}
 	}

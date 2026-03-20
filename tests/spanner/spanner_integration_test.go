@@ -37,8 +37,8 @@ import (
 )
 
 var (
-	SpannerSourceKind = "spanner"
-	SpannerToolKind   = "spanner-sql"
+	SpannerSourceType = "spanner"
+	SpannerToolType   = "spanner-sql"
 	SpannerProject    = os.Getenv("SPANNER_PROJECT")
 	SpannerDatabase   = os.Getenv("SPANNER_DATABASE")
 	SpannerInstance   = os.Getenv("SPANNER_INSTANCE")
@@ -55,7 +55,7 @@ func getSpannerVars(t *testing.T) map[string]any {
 	}
 
 	return map[string]any{
-		"kind":     SpannerSourceKind,
+		"type":     SpannerSourceType,
 		"project":  SpannerProject,
 		"instance": SpannerInstance,
 		"database": SpannerDatabase,
@@ -66,16 +66,8 @@ func initSpannerClients(ctx context.Context, project, instance, dbname string) (
 	// Configure the connection to the database
 	db := fmt.Sprintf("projects/%s/instances/%s/databases/%s", project, instance, dbname)
 
-	// Configure session pool to automatically clean inactive transactions
-	sessionPoolConfig := spanner.SessionPoolConfig{
-		TrackSessionHandles: true,
-		InactiveTransactionRemovalOptions: spanner.InactiveTransactionRemovalOptions{
-			ActionOnInactiveTransaction: spanner.WarnAndClose,
-		},
-	}
-
 	// Create Spanner client (for queries)
-	dataClient, err := spanner.NewClientWithConfig(context.Background(), db, spanner.ClientConfig{SessionPoolConfig: sessionPoolConfig})
+	dataClient, err := spanner.NewClient(context.Background(), db)
 	if err != nil {
 		return nil, nil, fmt.Errorf("unable to create new Spanner client: %w", err)
 	}
@@ -163,7 +155,7 @@ func TestSpannerToolEndpoints(t *testing.T) {
 	defer teardownGraph(t)
 
 	// Write config into a file and pass it to command
-	toolsFile := tests.GetToolsConfig(sourceConfig, SpannerToolKind, paramToolStmt, idParamToolStmt, nameParamToolStmt, arrayToolStmt, authToolStmt)
+	toolsFile := tests.GetToolsConfig(sourceConfig, SpannerToolType, paramToolStmt, idParamToolStmt, nameParamToolStmt, arrayToolStmt, authToolStmt)
 	toolsFile = addSpannerExecuteSqlConfig(t, toolsFile)
 	toolsFile = addSpannerReadOnlyConfig(t, toolsFile)
 	toolsFile = addTemplateParamConfig(t, toolsFile)
@@ -215,7 +207,7 @@ func TestSpannerToolEndpoints(t *testing.T) {
 	runSpannerListGraphsTest(t, graphName)
 }
 
-// getSpannerToolInfo returns statements and param for my-tool for spanner-sql kind
+// getSpannerToolInfo returns statements and param for my-tool for spanner-sql type
 func getSpannerParamToolInfo(tableName string) (string, string, string, string, string, string, map[string]any) {
 	createStatement := fmt.Sprintf("CREATE TABLE %s (id INT64, name STRING(MAX)) PRIMARY KEY (id)", tableName)
 	insertStatement := fmt.Sprintf("INSERT INTO %s (id, name) VALUES (1, @name1), (2, @name2), (3, @name3), (4, @name4)", tableName)
@@ -227,7 +219,7 @@ func getSpannerParamToolInfo(tableName string) (string, string, string, string, 
 	return createStatement, insertStatement, toolStatement, idToolStatement, nameToolStatement, arrayToolStatement, params
 }
 
-// getSpannerAuthToolInfo returns statements and param of my-auth-tool for spanner-sql kind
+// getSpannerAuthToolInfo returns statements and param of my-auth-tool for spanner-sql type
 func getSpannerAuthToolInfo(tableName string) (string, string, string, map[string]any) {
 	createStatement := fmt.Sprintf("CREATE TABLE %s (id INT64, name STRING(MAX), email STRING(MAX)) PRIMARY KEY (id)", tableName)
 	insertStatement := fmt.Sprintf("INSERT INTO %s (id, name, email) VALUES (1, @name1, @email1), (2, @name2, @email2)", tableName)
@@ -331,18 +323,18 @@ func addSpannerExecuteSqlConfig(t *testing.T, config map[string]any) map[string]
 		t.Fatalf("unable to get tools from config")
 	}
 	tools["my-exec-sql-tool-read-only"] = map[string]any{
-		"kind":        "spanner-execute-sql",
+		"type":        "spanner-execute-sql",
 		"source":      "my-instance",
 		"description": "Tool to execute sql",
 		"readOnly":    true,
 	}
 	tools["my-exec-sql-tool"] = map[string]any{
-		"kind":        "spanner-execute-sql",
+		"type":        "spanner-execute-sql",
 		"source":      "my-instance",
 		"description": "Tool to execute sql",
 	}
 	tools["my-auth-exec-sql-tool"] = map[string]any{
-		"kind":        "spanner-execute-sql",
+		"type":        "spanner-execute-sql",
 		"source":      "my-instance",
 		"description": "Tool to execute sql",
 		"authRequired": []string{
@@ -359,14 +351,14 @@ func addSpannerReadOnlyConfig(t *testing.T, config map[string]any) map[string]an
 		t.Fatalf("unable to get tools from config")
 	}
 	tools["access-schema-read-only"] = map[string]any{
-		"kind":        "spanner-sql",
+		"type":        "spanner-sql",
 		"source":      "my-instance",
 		"description": "Tool to access information schema in read-only mode.",
 		"statement":   "SELECT schema_name FROM `INFORMATION_SCHEMA`.SCHEMATA WHERE schema_name='INFORMATION_SCHEMA';",
 		"readOnly":    true,
 	}
 	tools["access-schema"] = map[string]any{
-		"kind":        "spanner-sql",
+		"type":        "spanner-sql",
 		"source":      "my-instance",
 		"description": "Tool to access information schema.",
 		"statement":   "SELECT schema_name FROM `INFORMATION_SCHEMA`.SCHEMATA WHERE schema_name='INFORMATION_SCHEMA';",
@@ -384,7 +376,7 @@ func addSpannerListTablesConfig(t *testing.T, config map[string]any) map[string]
 
 	// Add spanner-list-tables tool
 	tools["list-tables-tool"] = map[string]any{
-		"kind":        "spanner-list-tables",
+		"type":        "spanner-list-tables",
 		"source":      "my-instance",
 		"description": "Lists tables with their schema information",
 	}
@@ -402,7 +394,7 @@ func addSpannerListGraphsConfig(t *testing.T, config map[string]any) map[string]
 
 	// Add spanner-list-graphs tool
 	tools["list-graphs-tool"] = map[string]any{
-		"kind":        "spanner-list-graphs",
+		"type":        "spanner-list-graphs",
 		"source":      "my-instance",
 		"description": "Lists graphs with their schema information",
 	}
@@ -417,7 +409,7 @@ func addTemplateParamConfig(t *testing.T, config map[string]any) map[string]any 
 		t.Fatalf("unable to get tools from config")
 	}
 	toolsMap["insert-table-templateParams-tool"] = map[string]any{
-		"kind":        "spanner-sql",
+		"type":        "spanner-sql",
 		"source":      "my-instance",
 		"description": "Insert tool with template parameters",
 		"statement":   "INSERT INTO {{.tableName}} ({{array .columns}}) VALUES ({{.values}})",
@@ -428,7 +420,7 @@ func addTemplateParamConfig(t *testing.T, config map[string]any) map[string]any 
 		},
 	}
 	toolsMap["select-templateParams-tool"] = map[string]any{
-		"kind":        "spanner-sql",
+		"type":        "spanner-sql",
 		"source":      "my-instance",
 		"description": "Create table tool with template parameters",
 		"statement":   "SELECT * FROM {{.tableName}}",
@@ -437,7 +429,7 @@ func addTemplateParamConfig(t *testing.T, config map[string]any) map[string]any 
 		},
 	}
 	toolsMap["select-templateParams-combined-tool"] = map[string]any{
-		"kind":        "spanner-sql",
+		"type":        "spanner-sql",
 		"source":      "my-instance",
 		"description": "Create table tool with template parameters",
 		"statement":   "SELECT * FROM {{.tableName}} WHERE id = @id",
@@ -447,7 +439,7 @@ func addTemplateParamConfig(t *testing.T, config map[string]any) map[string]any 
 		},
 	}
 	toolsMap["select-fields-templateParams-tool"] = map[string]any{
-		"kind":        "spanner-sql",
+		"type":        "spanner-sql",
 		"source":      "my-instance",
 		"description": "Create table tool with template parameters",
 		"statement":   "SELECT {{array .fields}} FROM {{.tableName}}",
@@ -457,7 +449,7 @@ func addTemplateParamConfig(t *testing.T, config map[string]any) map[string]any 
 		},
 	}
 	toolsMap["select-filter-templateParams-combined-tool"] = map[string]any{
-		"kind":        "spanner-sql",
+		"type":        "spanner-sql",
 		"source":      "my-instance",
 		"description": "Create table tool with template parameters",
 		"statement":   "SELECT * FROM {{.tableName}} WHERE {{.columnFilter}} = @name",

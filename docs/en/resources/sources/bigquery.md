@@ -94,13 +94,25 @@ intend to run. Common roles include `roles/bigquery.user` (which includes
 permissions to run jobs and read data) or `roles/bigbigquery.dataViewer`.
 Follow this [guide][set-adc] to set up your ADC.
 
+If you are running on Google Compute Engine (GCE) or Google Kubernetes Engine
+(GKE), you might need to explicitly set the access scopes for the service
+account. While you can configure scopes when creating the VM or node pool, you
+can also specify them in the source configuration using the `scopes` field.
+Common scopes include `https://www.googleapis.com/auth/bigquery` or
+`https://www.googleapis.com/auth/cloud-platform`.
+
 ### Authentication via User's OAuth Access Token
 
 If the `useClientOAuth` parameter is set to `true`, Toolbox will instead use the
-OAuth access token for authentication. This token is parsed from the
-`Authorization` header passed in with the tool invocation request. This method
-allows Toolbox to make queries to [BigQuery][bigquery-docs] on behalf of the
-client or the end-user.
+OAuth access token for authentication. By default, this token is parsed from the
+`Authorization` header passed in with the tool invocation request.
+
+If you need to use a non-standard header for the access token (e.g., to avoid
+conflicts with other services like Cloud Run), you can specify the header name
+in the `useClientOAuth` field (e.g., `useClientOAuth: X-BigQuery-Auth`).
+
+This method allows Toolbox to make queries to [BigQuery][bigquery-docs] on behalf
+of the client or the end-user.
 
 When using this on-behalf-of authentication, you must ensure that the
 identity used has been granted the correct IAM permissions.
@@ -114,42 +126,52 @@ identity used has been granted the correct IAM permissions.
 Initialize a BigQuery source that uses ADC:
 
 ```yaml
-sources:
-  my-bigquery-source:
-    kind: "bigquery"
-    project: "my-project-id"
-    # location: "US" # Optional: Specifies the location for query jobs.
-    # writeMode: "allowed" # One of: allowed, blocked, protected. Defaults to "allowed".
-    # allowedDatasets: # Optional: Restricts tool access to a specific list of datasets.
-    #   - "my_dataset_1"
-    #   - "other_project.my_dataset_2"
-    # impersonateServiceAccount: "service-account@project-id.iam.gserviceaccount.com" # Optional: Service account to impersonate
+kind: sources
+name: my-bigquery-source
+type: "bigquery"
+project: "my-project-id"
+# location: "US" # Optional: Specifies the location for query jobs.
+# writeMode: "allowed" # One of: allowed, blocked, protected. Defaults to "allowed".
+# allowedDatasets: # Optional: Restricts tool access to a specific list of datasets.
+#   - "my_dataset_1"
+#   - "other_project.my_dataset_2"
+# impersonateServiceAccount: "service-account@project-id.iam.gserviceaccount.com" # Optional: Service account to impersonate
+# scopes: # Optional: List of OAuth scopes to request.
+#   - "https://www.googleapis.com/auth/bigquery"
+#   - "https://www.googleapis.com/auth/drive.readonly"
+# maxQueryResultRows: 50 # Optional: Limits the number of rows returned by queries. Defaults to 50.
 ```
 
 Initialize a BigQuery source that uses the client's access token:
 
 ```yaml
-sources:
-  my-bigquery-client-auth-source:
-    kind: "bigquery"
-    project: "my-project-id"
-    useClientOAuth: true
-    # location: "US" # Optional: Specifies the location for query jobs.
-    # writeMode: "allowed" # One of: allowed, blocked, protected. Defaults to "allowed".
-    # allowedDatasets: # Optional: Restricts tool access to a specific list of datasets.
-    #   - "my_dataset_1"
-    #   - "other_project.my_dataset_2"
-    # impersonateServiceAccount: "service-account@project-id.iam.gserviceaccount.com" # Optional: Service account to impersonate
+kind: sources
+name: my-bigquery-client-auth-source
+type: "bigquery"
+project: "my-project-id"
+useClientOAuth: true
+# location: "US" # Optional: Specifies the location for query jobs.
+# writeMode: "allowed" # One of: allowed, blocked, protected. Defaults to "allowed".
+# allowedDatasets: # Optional: Restricts tool access to a specific list of datasets.
+#   - "my_dataset_1"
+#   - "other_project.my_dataset_2"
+# impersonateServiceAccount: "service-account@project-id.iam.gserviceaccount.com" # Optional: Service account to impersonate
+# scopes: # Optional: List of OAuth scopes to request.
+#   - "https://www.googleapis.com/auth/bigquery"
+#   - "https://www.googleapis.com/auth/drive.readonly"
+# maxQueryResultRows: 50 # Optional: Limits the number of rows returned by queries. Defaults to 50.
 ```
 
 ## Reference
 
 | **field**                 | **type** | **required** | **description**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 |---------------------------|:--------:|:------------:|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| kind                      |  string  |     true     | Must be "bigquery".                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| type                      |  string  |     true     | Must be "bigquery".                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | project                   |  string  |     true     | Id of the Google Cloud project to use for billing and as the default project for BigQuery resources.                                                                                                                                                                                                                                                                                                                                                                                                                |
 | location                  |  string  |    false     | Specifies the location (e.g., 'us', 'asia-northeast1') in which to run the query job. This location must match the location of any tables referenced in the query. Defaults to the table's location or 'US' if the location cannot be determined. [Learn More](https://cloud.google.com/bigquery/docs/locations)                                                                                                                                                                                                    |
 | writeMode                 |  string  |    false     | Controls the write behavior for tools. `allowed` (default): All queries are permitted. `blocked`: Only `SELECT` statements are allowed for the `bigquery-execute-sql` tool. `protected`: Enables session-based execution where all tools associated with this source instance share the same [BigQuery session](https://cloud.google.com/bigquery/docs/sessions-intro). This allows for stateful operations using temporary tables (e.g., `CREATE TEMP TABLE`). For `bigquery-execute-sql`, `SELECT` statements can be used on all tables, but write operations are restricted to the session's temporary dataset. For tools like `bigquery-sql`, `bigquery-forecast`, and `bigquery-analyze-contribution`, the `writeMode` restrictions do not apply, but they will operate within the shared session. **Note:** The `protected` mode cannot be used with `useClientOAuth: true`. It is also not recommended for multi-user server environments, as all users would share the same session. A session is terminated automatically after 24 hours of inactivity or after 7 days, whichever comes first. A new session is created on the next request, and any temporary data from the previous session will be lost. |
 | allowedDatasets           | []string |    false     | An optional list of dataset IDs that tools using this source are allowed to access. If provided, any tool operation attempting to access a dataset not in this list will be rejected. To enforce this, two types of operations are also disallowed: 1) Dataset-level operations (e.g., `CREATE SCHEMA`), and 2) operations where table access cannot be statically analyzed (e.g., `EXECUTE IMMEDIATE`, `CREATE PROCEDURE`). If a single dataset is provided, it will be treated as the default for prebuilt tools. |
-| useClientOAuth            |   bool   |    false     | If true, forwards the client's OAuth access token from the "Authorization" header to downstream queries. **Note:** This cannot be used with `writeMode: protected`.                                                                                                                                                                                                                                                                                                                                                |
+| useClientOAuth            |  string  |    false     | If set to `'true'`, forwards the client's OAuth access token from the default `Authorization` header. If set to a custom header name (e.g., `X-My-Auth`), that header will be used instead. An empty string or `'false'` disables this feature. Defaults to `""` (disabled). |
+| scopes                    | []string |    false     | A list of OAuth 2.0 scopes to use for the credentials. If not provided, default scopes are used.                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | impersonateServiceAccount |  string  |    false     | Service account email to impersonate when making BigQuery and Dataplex API calls. The authenticated principal must have the `roles/iam.serviceAccountTokenCreator` role on the target service account. [Learn More](https://cloud.google.com/iam/docs/service-account-impersonation)                                                                                                                                                                                                                                |
+| maxQueryResultRows             |   int    |    false     | The maximum number of rows to return from a query. Defaults to 50. |
