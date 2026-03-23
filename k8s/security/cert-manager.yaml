@@ -1,0 +1,102 @@
+# Cert-Manager 配置
+# 用于自动管理 Let's Encrypt TLS 证书
+
+# ====================
+# ClusterIssuer: Let's Encrypt 生产环境
+# ====================
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    # Let's Encrypt 生产环境服务器
+    server: https://acme-v02.api.letsencrypt.org/directory
+    
+    # 你的邮箱（用于接收证书过期提醒）
+    email: your-email@example.com  # 修改为你的邮箱
+    
+    # 私钥存储位置
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    
+    # HTTP-01 挑战（通过 HTTP 验证域名所有权）
+    solvers:
+    - http01:
+        ingress:
+          class: traefik
+
+---
+# ====================
+# ClusterIssuer: Let's Encrypt 测试环境
+# ====================
+# 用于测试，避免达到生产环境的速率限制
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    # Let's Encrypt 测试环境服务器
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    
+    email: your-email@example.com  # 修改为你的邮箱
+    
+    privateKeySecretRef:
+      name: letsencrypt-staging
+    
+    solvers:
+    - http01:
+        ingress:
+          class: traefik
+
+---
+# ====================
+# ClusterIssuer: 自签名证书
+# ====================
+# 用于本地开发或内网环境
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+
+---
+# ====================
+# Certificate: 示例证书配置
+# ====================
+# 通常由 Ingress 的 cert-manager.io/cluster-issuer annotation 自动创建
+# 也可以手动创建
+# apiVersion: cert-manager.io/v1
+# kind: Certificate
+# metadata:
+#   name: toolbox-tls
+#   namespace: mcp-toolbox
+# spec:
+#   secretName: toolbox-tls
+#   issuerRef:
+#     name: letsencrypt-prod
+#     kind: ClusterIssuer
+#   dnsNames:
+#   - toolbox.example.com
+#   - www.toolbox.example.com
+
+---
+# ====================
+# 安装说明
+# ====================
+# 如果 cert-manager 未安装，先安装：
+# 
+# kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.0/cert-manager.yaml
+#
+# 等待 cert-manager 启动：
+# kubectl wait --for=condition=Available --timeout=300s \
+#   deployment/cert-manager -n cert-manager
+#
+# 然后应用本文件：
+# kubectl apply -f cert-manager.yaml
+#
+# 验证 ClusterIssuer 状态：
+# kubectl get clusterissuer
+# kubectl describe clusterissuer letsencrypt-prod

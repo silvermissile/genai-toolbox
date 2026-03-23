@@ -1,0 +1,15 @@
+# 忽略敏感文件
+secret.yaml
+auth
+*.key
+*.crt
+*.pem
+
+# 忽略临时文件
+*-temp.yaml
+*.tmp
+*.bak
+*.backup
+
+# 忽略日志文件
+*.log

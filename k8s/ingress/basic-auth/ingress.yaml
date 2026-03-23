@@ -1,0 +1,99 @@
+# Ingress 配置
+# 通过 Traefik 暴露 Toolbox 服务，并启用 BasicAuth 认证
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: toolbox-ingress
+  namespace: mcp-toolbox
+  labels:
+    app: toolbox
+  annotations:
+    # ====================
+    # 核心配置：启用 BasicAuth 中间件
+    # ====================
+    # 格式: {namespace}-{middleware-name}@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: mcp-toolbox-toolbox-basic-auth@kubernetescrd
+    
+    # ====================
+    # TLS/HTTPS 配置
+    # ====================
+    # 强制 HTTPS 重定向
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    
+    # 使用 cert-manager 自动管理 TLS 证书（需要先安装 cert-manager）
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    
+    # 或使用自签名证书进行测试
+    # cert-manager.io/cluster-issuer: "selfsigned-issuer"
+    
+    # ====================
+    # 可选：安全增强
+    # ====================
+    # 限制访问源 IP（取消注释并修改 IP 范围）
+    # traefik.ingress.kubernetes.io/router.middlewares: mcp-toolbox-ip-whitelist@kubernetescrd,mcp-toolbox-toolbox-basic-auth@kubernetescrd
+    
+    # 启用访问日志
+    # traefik.ingress.kubernetes.io/access-log: "true"
+    
+    # 限流配置
+    # traefik.ingress.kubernetes.io/router.middlewares: mcp-toolbox-rate-limit@kubernetescrd,mcp-toolbox-toolbox-basic-auth@kubernetescrd
+
+spec:
+  # ====================
+  # TLS 配置
+  # ====================
+  tls:
+  - hosts:
+    - toolbox.example.com  # 修改为你的域名
+    secretName: toolbox-tls  # 由 cert-manager 自动创建
+  
+  # ====================
+  # 路由规则
+  # ====================
+  rules:
+  - host: toolbox.example.com  # 修改为你的域名
+    http:
+      paths:
+      # 路径 1: 主要 API 路径
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: toolbox
+            port:
+              number: 5000
+      
+      # 可选：如果需要对不同路径应用不同认证策略
+      # - path: /health
+      #   pathType: Exact
+      #   backend:
+      #     service:
+      #       name: toolbox
+      #       port:
+      #         number: 5000
+      # 注意：health endpoint 也会被认证保护
+
+---
+# ====================
+# 可选：HTTP 到 HTTPS 重定向
+# ====================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: toolbox-ingress-redirect
+  namespace: mcp-toolbox
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.middlewares: kube-system-redirect-https@kubernetescrd
+spec:
+  rules:
+  - host: toolbox.example.com  # 修改为你的域名
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: toolbox
+            port:
+              number: 5000

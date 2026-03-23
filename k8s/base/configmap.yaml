@@ -1,0 +1,64 @@
+# ConfigMap 配置
+# 存储 tools.yaml 配置文件
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: toolbox-config
+  namespace: mcp-toolbox
+data:
+  tools.yaml: |
+    # ===========================================
+    # MCP Toolbox 配置示例
+    # ===========================================
+    
+    # 数据源配置
+    kind: sources
+    name: my-postgres
+    type: postgres
+    host: ${POSTGRES_HOST}
+    port: 5432
+    database: ${POSTGRES_DB}
+    user: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
+    
+    ---
+    # 工具配置示例
+    kind: tools
+    name: list-tables
+    type: postgres-sql
+    source: my-postgres
+    description: 列出数据库中的所有表
+    statement: |
+      SELECT schemaname, tablename 
+      FROM pg_tables 
+      WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+      ORDER BY schemaname, tablename;
+    
+    ---
+    kind: tools
+    name: query-data
+    type: postgres-sql
+    source: my-postgres
+    description: 查询指定表的数据
+    parameters:
+      - name: table_name
+        type: string
+        description: 表名
+        required: true
+      - name: limit
+        type: int
+        description: 返回行数限制
+        default: 100
+    statement: |
+      SELECT * FROM {{.table_name}} LIMIT $1;
+    templateParameters:
+      - name: table_name
+        type: string
+        description: 表名
+    
+    ---
+    # 工具集配置
+    toolsets:
+      default:
+        - list-tables
+        - query-data

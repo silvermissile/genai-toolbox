@@ -57,3 +57,11 @@ logs/
 .env
 .env.local
 .env.*.local
+
+# K8s 敏感文件
+k8s/**/secret.yaml
+k8s/**/auth
+k8s/**/*.key
+k8s/**/*.crt
+k8s/**/*.pem
+k8s/**/*-temp.yaml

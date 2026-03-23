@@ -1,0 +1,9 @@
+# Namespace 配置
+# 创建独立的命名空间用于部署 MCP Toolbox
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mcp-toolbox
+  labels:
+    name: mcp-toolbox
+    app: toolbox

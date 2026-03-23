@@ -1,0 +1,24 @@
+# Traefik BasicAuth Middleware 配置
+# 用于在 Ingress 层验证用户身份
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: toolbox-basic-auth
+  namespace: mcp-toolbox
+  labels:
+    app: toolbox
+spec:
+  basicAuth:
+    # 引用包含用户名密码的 Secret
+    secret: toolbox-basic-auth
+    
+    # 认证域提示信息（显示在浏览器登录框）
+    realm: "MCP Toolbox - 请输入用户名和密码"
+    
+    # 移除 Authorization header（可选）
+    # 如果设置为 true，BasicAuth header 不会传递给后端 toolbox
+    # 推荐设置为 true，避免混淆
+    removeHeader: true
+    
+    # 可选：自定义响应头（认证失败时）
+    # headerField: "X-WebAuth-User"

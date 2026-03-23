@@ -1,0 +1,23 @@
+# Service 配置
+# 为 Toolbox Pod 创建 ClusterIP Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: toolbox
+  namespace: mcp-toolbox
+  labels:
+    app: toolbox
+spec:
+  type: ClusterIP  # 仅集群内访问，外部通过 Ingress
+  selector:
+    app: toolbox
+  ports:
+  - name: http
+    port: 5000
+    targetPort: http
+    protocol: TCP
+  # 可选：会话亲和性（如果有多个副本）
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800  # 3 小时

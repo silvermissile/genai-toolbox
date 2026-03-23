@@ -1,0 +1,120 @@
+# Deployment 配置
+# 部署 MCP Toolbox 应用
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: toolbox
+  namespace: mcp-toolbox
+  labels:
+    app: toolbox
+spec:
+  replicas: 1  # 可根据需要调整副本数
+  selector:
+    matchLabels:
+      app: toolbox
+  template:
+    metadata:
+      labels:
+        app: toolbox
+    spec:
+      # 安全上下文
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      
+      containers:
+      - name: toolbox
+        # 使用官方镜像（根据需要修改版本）
+        image: us-central1-docker.pkg.dev/database-toolbox/toolbox/toolbox:0.30.0
+        
+        imagePullPolicy: IfNotPresent
+        
+        # 容器安全策略
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: false  # toolbox 需要写临时文件
+        
+        # 启动参数
+        args:
+        - "--tools-file"
+        - "/config/tools.yaml"
+        - "--log-level"
+        - "info"
+        - "--address"
+        - "0.0.0.0"
+        - "--port"
+        - "5000"
+        
+        # 端口配置
+        ports:
+        - name: http
+          containerPort: 5000
+          protocol: TCP
+        
+        # 环境变量（从 Secret 注入）
+        envFrom:
+        - secretRef:
+            name: toolbox-secrets
+        
+        # 额外的环境变量
+        env:
+        - name: TZ
+          value: "Asia/Shanghai"  # 根据需要修改时区
+        
+        # 挂载配置文件
+        volumeMounts:
+        - name: config
+          mountPath: /config
+          readOnly: true
+        
+        # 健康检查
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        
+        # 资源限制
+        resources:
+          limits:
+            cpu: "1"
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      
+      # 挂载 ConfigMap 作为配置文件
+      volumes:
+      - name: config
+        configMap:
+          name: toolbox-config
+      
+      # 可选：使用节点亲和性
+      # affinity:
+      #   nodeAffinity:
+      #     preferredDuringSchedulingIgnoredDuringExecution:
+      #     - weight: 1
+      #       preference:
+      #         matchExpressions:
+      #         - key: node-role.kubernetes.io/worker
+      #           operator: In
+      #           values:
+      #           - "true"

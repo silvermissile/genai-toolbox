@@ -1,0 +1,52 @@
+# All-in-One 配置文件
+# 用于快速部署 Traefik BasicAuth 认证
+# 
+# 使用前准备：
+# 1. 生成认证文件: htpasswd -nbB admin your-password > auth
+# 2. 创建 Secret: kubectl create secret generic toolbox-basic-auth --from-file=users=auth -n mcp-toolbox
+# 3. 修改本文件中的域名: toolbox.example.com -> 你的域名
+# 4. 应用: kubectl apply -f all-in-one.yaml
+
+---
+# Traefik BasicAuth Middleware
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: toolbox-basic-auth
+  namespace: mcp-toolbox
+spec:
+  basicAuth:
+    secret: toolbox-basic-auth
+    realm: "MCP Toolbox - 请输入用户名和密码"
+    removeHeader: true
+
+---
+# Ingress 配置（带 BasicAuth）
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: toolbox-ingress
+  namespace: mcp-toolbox
+  annotations:
+    # 启用 BasicAuth
+    traefik.ingress.kubernetes.io/router.middlewares: mcp-toolbox-toolbox-basic-auth@kubernetescrd
+    # 强制 HTTPS
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # 自动证书（需要先安装 cert-manager）
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+  - hosts:
+    - toolbox.example.com  # 修改为你的域名
+    secretName: toolbox-tls
+  rules:
+  - host: toolbox.example.com  # 修改为你的域名
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: toolbox
+            port:
+              number: 5000

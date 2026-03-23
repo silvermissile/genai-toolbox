@@ -1,0 +1,147 @@
+# NetworkPolicy 配置
+# 用于限制 Toolbox 的网络访问（仅集群内部访问）
+
+# 策略 1: 只允许来自特定 namespace 的流量
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: toolbox-allow-from-namespace
+  namespace: mcp-toolbox
+spec:
+  podSelector:
+    matchLabels:
+      app: toolbox
+  policyTypes:
+  - Ingress
+  ingress:
+  # 允许来自特定 namespace 的所有 Pod
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: trusted-apps  # 修改为你的信任 namespace
+    ports:
+    - protocol: TCP
+      port: 5000
+
+---
+# 策略 2: 只允许来自特定 Pod 的流量
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: toolbox-allow-from-pods
+  namespace: mcp-toolbox
+spec:
+  podSelector:
+    matchLabels:
+      app: toolbox
+  policyTypes:
+  - Ingress
+  ingress:
+  # 允许来自标记为 frontend 的 Pod
+  - from:
+    - podSelector:
+        matchLabels:
+          role: frontend
+    ports:
+    - protocol: TCP
+      port: 5000
+  # 允许来自标记为 backend 的 Pod
+  - from:
+    - podSelector:
+        matchLabels:
+          role: backend
+    ports:
+    - protocol: TCP
+      port: 5000
+
+---
+# 策略 3: 允许来自 Ingress Controller（如果需要外部访问）
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: toolbox-allow-from-ingress
+  namespace: mcp-toolbox
+spec:
+  podSelector:
+    matchLabels:
+      app: toolbox
+  policyTypes:
+  - Ingress
+  ingress:
+  # 允许来自 Traefik Ingress Controller
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: traefik
+    ports:
+    - protocol: TCP
+      port: 5000
+
+---
+# 策略 4: 完全隔离（拒绝所有外部流量，仅 DNS 和健康检查）
+# 取消注释以启用
+# apiVersion: networking.k8s.io/v1
+# kind: NetworkPolicy
+# metadata:
+#   name: toolbox-deny-all
+#   namespace: mcp-toolbox
+# spec:
+#   podSelector:
+#     matchLabels:
+#       app: toolbox
+#   policyTypes:
+#   - Ingress
+#   - Egress
+#   egress:
+#   # 允许 DNS 查询
+#   - to:
+#     - namespaceSelector:
+#         matchLabels:
+#           kubernetes.io/metadata.name: kube-system
+#     ports:
+#     - protocol: UDP
+#       port: 53
+#   # 允许访问外部数据库（根据实际情况修改）
+#   - to:
+#     - ipBlock:
+#         cidr: 0.0.0.0/0
+#         except:
+#         - 169.254.169.254/32  # 阻止访问元数据服务
+#     ports:
+#     - protocol: TCP
+#       port: 5432  # PostgreSQL
+
+---
+# ====================
+# 使用说明
+# ====================
+# 
+# 1. 根据需求选择合适的策略（可以组合使用）
+# 
+# 2. 修改配置：
+#    - 将 "trusted-apps" 改为你的 namespace label
+#    - 将 "frontend"/"backend" 改为你的 Pod label
+#    - 调整端口号（如果 toolbox 使用其他端口）
+# 
+# 3. 应用配置：
+#    kubectl apply -f network-policy.yaml
+# 
+# 4. 验证：
+#    kubectl get networkpolicy -n mcp-toolbox
+#    kubectl describe networkpolicy toolbox-allow-from-namespace -n mcp-toolbox
+# 
+# 5. 测试连接：
+#    # 从允许的 namespace 测试（应该成功）
+#    kubectl run test-pod --rm -it \
+#      --image=curlimages/curl \
+#      --namespace=trusted-apps \
+#      -- curl http://toolbox.mcp-toolbox.svc.cluster.local:5000/health
+#    
+#    # 从不允许的 namespace 测试（应该超时）
+#    kubectl run test-pod --rm -it \
+#      --image=curlimages/curl \
+#      --namespace=default \
+#      -- curl --max-time 5 http://toolbox.mcp-toolbox.svc.cluster.local:5000/health
